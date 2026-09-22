@@ -14,38 +14,15 @@ st.set_page_config(
     page_title="Portal Validasi Kaizen", page_icon="🏢", layout="wide"
 )
 
-# Injeksi CSS Kustom untuk Tema Merah-Putih Pastel & Tampilan Portal
 st.markdown(
     """
     <style>
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
-    
-    h1 {
-        color: #B03A2E; 
-        text-align: center;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        font-weight: 700;
-    }
-    
-    .stButton>button {
-        background-color: #E07A5F;
-        color: white;
-        border-radius: 6px;
-        border: none;
-        padding: 0.5rem 1rem;
-        font-weight: 600;
-    }
-    .stButton>button:hover {
-        background-color: #C85A3F;
-        color: white;
-    }
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    h1 { color: #B03A2E; text-align: center; font-family: sans-serif; font-weight: 700; }
+    .stButton>button { background-color: #E07A5F; color: white; border-radius: 6px; border: none; font-weight: 600; }
     </style>
 """,
     unsafe_allow_html=True,
@@ -53,28 +30,28 @@ st.markdown(
 
 st.title("🏢 Portal Validasi Kaizen")
 st.markdown(
-    "<p style='text-align: center; color: #555; font-size: 1.1rem;'>Unggah"
-    " dokumen evaluasi, biarkan AI bekerja secara objektif, dan lakukan"
-    " validasi akhir.</p>",
+    "<p style='text-align: center; color: #555;'>Unggah dokumen evaluasi, biarkan"
+    " AI bekerja secara objektif, dan lakukan validasi akhir.</p>",
     unsafe_allow_html=True,
 )
 st.divider()
 
-# Sambungan ke Gemini API via Secrets
+# Inisialisasi API Key Gemini dari Secrets
 try:
-  API_KEY = st.secrets["GEMINI_API_KEY"]
+  API_KEY = st.secrets["GEMINI_API_KEY"].strip()
   client = genai.Client(api_key=API_KEY)
-except Exception:
+except Exception as e:
   st.error(
-      "Gagal memuat GEMINI_API_KEY. Pastikan kunci rahasia sudah diset di menu"
-      " Settings > Secrets pada Streamlit Cloud."
+      "Gagal memuat GEMINI_API_KEY. Pastikan di Secrets tertulis:"
+      f' GEMINI_API_KEY = "..." | Error: {e}'
   )
   st.stop()
 
-MODEL_ID = "gemini-3.5-flash"
+# Gunakan model rekomendasi standar
+MODEL_ID = "gemini-1.5-flash"
 
 # ==========================================
-# 2. INISIALISASI MEMORI SESI (SESSION STATE)
+# 2. MEMORI SESI (SESSION STATE)
 # ==========================================
 if "proses_selesai" not in st.session_state:
   st.session_state.proses_selesai = False
@@ -87,48 +64,42 @@ if "transkrip" not in st.session_state:
 
 
 # ==========================================
-# 3. FUNGSI MESIN AI & PARSER (ANTI-ERROR)
+# 3. FUNGSI MESIN AI & PARSER
 # ==========================================
 def panggil_ai_dengan_retry(
     contents, deskripsi_agen, log_ui, maksimal_percobaan=3
 ):
-  """Panggilan API Gemini dengan jeda anti-limit dan log langsung ke antarmuka."""
   for percobaan in range(maksimal_percobaan):
     try:
-      log_ui.write(f"⏳ **{deskripsi_agen}:** Sedang menganalisis dokumen...")
+      log_ui.write(f"⏳ **{deskripsi_agen}:** Sedang menganalisis...")
       response = client.models.generate_content(
           model=MODEL_ID, contents=contents
       )
-
       log_ui.write(
-          f"✅ **{deskripsi_agen}:** Selesai! Menunggu pendinginan 12 detik"
-          " (anti-limit RPM)..."
+          f"✅ **{deskripsi_agen}:** Selesai! Pendinginan 12 detik (Anti-Limit)..."
       )
       time.sleep(12)
-
       return response.text if response and response.text else ""
     except Exception as e:
       if any(
-          k in str(e) for k in ["503", "429", "RESOURCE_EXHAUSTED", "UNAVAILABLE"]
+          k in str(e).upper()
+          for k in ["503", "429", "RESOURCE_EXHAUSTED", "UNAVAILABLE"]
       ):
         log_ui.write(
-            f"⚠️ **{deskripsi_agen}:** Peladen Google sibuk. Menunggu 20"
-            " detik..."
+            f"⚠️ **{deskripsi_agen}:** Limit/Server sibuk. Jeda 20 detik..."
         )
         time.sleep(20)
       else:
         if percobaan == maksimal_percobaan - 1:
           raise e
         log_ui.write(
-            f"⚠️ **{deskripsi_agen}:** Mencoba ulang (Percobaan"
-            f" {percobaan + 2}/{maksimal_percobaan})..."
+            f"⚠️ **{deskripsi_agen}:** Mencoba ulang ({percobaan + 2}/{maksimal_percobaan})..."
         )
         time.sleep(10)
   return ""
 
 
 def bersihkan_dan_parse_json(teks_raw):
-  """Memastikan output AI diekstrak menjadi JSON array yang sah (kebal NoneType)."""
   if not teks_raw:
     return []
   try:
@@ -155,17 +126,27 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
     with st.status(
         "🤖 AI Multi-Agent sedang bekerja...", expanded=True
     ) as status_box:
+      temp_path = f"temp_{uploaded_file.name}"
       try:
-        status_box.write("📄 Mengunggah dokumen ke peladen Google...")
-        temp_path = f"temp_{uploaded_file.name}"
+        status_box.write("📄 Membaca file PDF ke server...")
         with open(temp_path, "wb") as f:
           f.write(uploaded_file.getbuffer())
 
+        status_box.write("☁️ Mengunggah file ke Google AI...")
         gemini_file = client.files.upload(file=temp_path)
-        while gemini_file.state.name == "PROCESSING":
-          status_box.write("⏳ Memproses berkas PDF di sistem Google...")
-          time.sleep(3)
+
+        # Tunggu sampai file benar-benar siap (ACTIVE)
+        while gemini_file.state.name in ["PROCESSING", "PENDING"]:
+          status_box.write(
+              f"⏳ Menunggu pemrosesan file di Google AI ({gemini_file.state.name})..."
+          )
+          time.sleep(4)
           gemini_file = client.files.get(name=gemini_file.name)
+
+        if gemini_file.state.name != "ACTIVE":
+          raise Exception(
+              f"File gagal diproses oleh Google AI. Status: {gemini_file.state.name}"
+          )
 
         # 1. Pengekstrak
         prompt_1 = (
@@ -180,7 +161,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         # 2. Jaksa
         prompt_2 = (
             f"Fakta Kasus: {laporan_agen_1}\nTugasmu: Berikan kritik tajam"
-            " mengenai kelemahan, potensi risiko, atau celah dari paper ini."
+            " mengenai kelemahan, potensi risiko, atau celah paper ini."
         )
         dakwaan_jaksa = panggil_ai_dengan_retry(
             prompt_2, "Jaksa Penilai [2/5]", status_box
@@ -189,18 +170,16 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         # 3. Pembela
         prompt_3 = (
             f"Fakta: {laporan_agen_1}\nKritik: {dakwaan_jaksa}\nTugasmu: Bantah"
-            " kritik Jaksa dan temukan nilai tambah dari perbaikan ini."
+            " kritik Jaksa dan temukan nilai tambah perbaikan."
         )
         pembelaan_pengacara = panggil_ai_dengan_retry(
             prompt_3, "Pengacara Pembela [3/5]", status_box
         )
 
-        # 4. Hakim Agung (Rubrik Ketat)
+        # 4. Hakim Agung
         prompt_4 = f"""
-                Evaluasi 21 poin rubrik Kaizen. Kamu adalah penilai yang ketat dan objektif.
-                Fakta: {laporan_agen_1}
-                Kritik: {dakwaan_jaksa}
-                Pembelaan: {pembelaan_pengacara}
+                Evaluasi 21 poin rubrik Kaizen secara ketat dan objektif.
+                Fakta: {laporan_agen_1} | Kritik: {dakwaan_jaksa} | Pembelaan: {pembelaan_pengacara}
 
                 1. 5G [0, 1, 2] | 2. Losses Measurement [0, 1, 2] | 3. 5W1H [0, 1, 2] | 4. Visualisasi [0, 1, 2] | 5. Target SMART [0, 2] | 6. Fishbone 4M [0, 1, 2] | 7. Pemetaan 4M [0, 1, 2] | 8. Hubungan Akar Penyebab [0, 1, 2] | 9. Bukti Akar Penyebab [0, 3, 5] | 10. Ketepatan Root Cause [0, 1, 2] | 11. Action Plan PIC [0, 1, 2] | 12. Rencana Perbaikan [0, 1, 2] | 13. Form Usulan Perbaikan [0, 3, 5] | 14. Pelaksanaan Action Plan [0, 1, 2] | 15. Dokumentasi Pelaksanaan [0, 5, 8] | 16. Pencapaian Target [0, 1] | 17. Pengecekan Hasil [0, 3, 5] | 18. Kelengkapan Standardisasi [0, 3, 5] | 19. Validasi Standardisasi [0, 1, 2] | 20. Tindak Lanjut Sosialisasi [0, 3, 5] | 21. Replikasi [0, 3, 5]
                 
@@ -226,9 +205,12 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         status_box.update(
             label="✅ Analisis Selesai!", state="complete", expanded=False
         )
-        os.remove(temp_path)
 
-        # --- PEMROSESAN DATA UNTUK TABEL & MEMORI ---
+        # Hapus file sementara
+        if os.path.exists(temp_path):
+          os.remove(temp_path)
+
+        # --- PEMROSESAN DATA ---
         if hasil_hakim_json:
           poin_manual = [7, 10, 11, 18, 19, 21]
           for item in hasil_hakim_json:
@@ -241,10 +223,15 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
 
           df_r = pd.DataFrame(hasil_hakim_json)
           df_r.columns = df_r.columns.str.lower()
-
           cols = [
               c
-              for c in ["no", "kriteria", "skor", "status validasi", "justifikasi"]
+              for c in [
+                  "no",
+                  "kriteria",
+                  "skor",
+                  "status validasi",
+                  "justifikasi",
+              ]
               if c in df_r.columns
           ]
           st.session_state.df_rubrik = df_r[cols]
@@ -266,20 +253,19 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         st.rerun()
 
       except Exception as e:
+        if os.path.exists(temp_path):
+          os.remove(temp_path)
         status_box.update(label="❌ Terjadi Kesalahan", state="error")
-        st.error(f"Rincian kesalahan: {e}")
+        # Menampilkan ralat lengkap ke layar
+        st.error(f"**Detail Pesan Ralat:** `{e}`")
 
 # ==========================================
-# 5. HASIL PENILAIAN & UNDUH EXCEL MULTI-SHEET
+# 5. HASIL PENILAIAN & UNDUH EXCEL
 # ==========================================
 if st.session_state.proses_selesai:
   st.success("Analisis AI selesai! Silakan periksa dan validasi tabel di bawah.")
 
   st.subheader("📝 1. Tabel Validasi Rubrik (21 Poin)")
-  st.caption(
-      "Baris dengan status **⚠️ VALIDASI MANUAL** dapat disesuaikan nilainya"
-      " secara langsung pada tabel."
-  )
   edited_rubrik = st.data_editor(
       st.session_state.df_rubrik, num_rows="dynamic", use_container_width=True
   )
@@ -289,7 +275,6 @@ if st.session_state.proses_selesai:
       st.session_state.df_saving, num_rows="dynamic", use_container_width=True
   )
 
-  # Menyiapkan File Excel 3 Sheet di Memori
   output = io.BytesIO()
   with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
     edited_rubrik.to_excel(
