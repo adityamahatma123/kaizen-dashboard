@@ -38,7 +38,7 @@ st.markdown(
 )
 st.divider()
 
-# Inisialisasi Kredensial Gemini API dari Streamlit Secrets
+# Inisialisasi API Key dari Secrets
 try:
   API_KEY = st.secrets["GEMINI_API_KEY"].strip()
   client = genai.Client(api_key=API_KEY)
@@ -46,7 +46,6 @@ except Exception as e:
   st.error(f"Gagal memuat API Key dari Secrets. Detail: {e}")
   st.stop()
 
-# Menetapkan model utama ke gemini-3.5-flash
 MODEL_ID = "gemini-3.5-flash"
 
 # ==========================================
@@ -70,7 +69,7 @@ if "nama_file" not in st.session_state:
 def panggil_ai_dengan_retry(
     contents, deskripsi_agen, log_ui, maksimal_percobaan=3
 ):
-  """Melakukan panggilan API Gemini dengan penangan jeda otomatis (Anti Rate Limit)."""
+  """Eksekusi panggilan API dengan jeda anti-limit dan log langsung ke UI."""
   for percobaan in range(maksimal_percobaan):
     try:
       log_ui.write(f"⏳ **{deskripsi_agen}:** Sedang menganalisis...")
@@ -154,7 +153,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
               f"Berkas gagal diproses. Status: {gemini_file.state.name}"
           )
 
-        # 1. Agen Pengekstrak
+        # 1. Pengekstrak
         prompt_1 = (
             "Ekstrak fakta dari PDF: 1. Masalah Utama 2. Solusi 3. Bukti Visual"
             " 4. Hasil Angka Nyata (Saving)."
@@ -163,7 +162,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
             [gemini_file, prompt_1], "Pengekstrak Bukti [1/5]", status_box
         )
 
-        # 2. Agen Jaksa
+        # 2. Jaksa
         prompt_2 = (
             f"Fakta Kasus: {laporan_agen_1}\nTugasmu: Cari kelemahan, celah,"
             " kurangnya bukti, atau potensi manipulasi angka."
@@ -172,7 +171,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
             prompt_2, "Jaksa Penilai [2/5]", status_box
         )
 
-        # 3. Agen Pembela
+        # 3. Pembela
         prompt_3 = (
             f"Fakta: {laporan_agen_1}\nKritik: {dakwaan_jaksa}\nTugasmu: Bantah"
             " kritik Jaksa dan temukan nilai tambah."
@@ -181,20 +180,20 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
             prompt_3, "Pengacara Pembela [3/5]", status_box
         )
 
-        # 4. Agen Hakim Agung
+        # 4. Hakim Agung (Perbaikan Kurung Kurawal {{ }})
         prompt_4 = f"""
         Fakta: {laporan_agen_1} | Kritik: {dakwaan_jaksa} | Pembelaan: {pembelaan_pengacara}
         Evaluasi 21 poin rubrik:
         1. 5G [0, 1, 2] | 2. Losses Measurement [0, 1, 2] | 3. 5W1H [0, 1, 2] | 4. Visualisasi [0, 1, 2] | 5. Target SMART [0, 2] | 6. Fishbone 4M [0, 1, 2] | 7. Pemetaan 4M [0, 1, 2] | 8. Hubungan Akar Penyebab [0, 1, 2] | 9. Bukti Akar Penyebab [0, 3, 5] | 10. Ketepatan Root Cause [0, 1, 2] | 11. Action Plan PIC [0, 1, 2] | 12. Rencana Perbaikan [0, 1, 2] | 13. Form Usulan Perbaikan [0, 3, 5] | 14. Pelaksanaan Action Plan [0, 1, 2] | 15. Dokumentasi Pelaksanaan [0, 5, 8] | 16. Pencapaian Target [0, 1] | 17. Pengecekan Hasil [0, 3, 5] | 18. Kelengkapan Standardisasi [0, 3, 5] | 19. Validasi Standardisasi [0, 1, 2] | 20. Tindak Lanjut Sosialisasi [0, 3, 5] | 21. Replikasi [0, 3, 5]
         
-        KELUARKAN HANYA FORMAT JSON ARRAY: [{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan"}]
+        KELUARKAN HANYA FORMAT JSON ARRAY: [{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan"}}]
         """
         raw_hakim = panggil_ai_dengan_retry(
             prompt_4, "Hakim Agung [4/5]", status_box
         )
         hasil_hakim_json = bersihkan_dan_parse_json(raw_hakim)
 
-        # 5. Agen Analis Impact
+        # 5. Analis Impact
         prompt_5 = (
             "Evaluasi 8 kategori impact: Gas/Steam, Material Balance,"
             " Manpower, Downtime, Waktu Kerja, Overtime, Listrik, Air.\nKELUARKAN"
