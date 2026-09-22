@@ -264,13 +264,21 @@ if st.session_state.proses_selesai:
   st.success("Analisis AI selesai! Silakan periksa dan validasi tabel di bawah.")
 
   st.subheader("📝 1. Tabel Validasi Rubrik (21 Poin)")
+  # Menambahkan parameter key="tabel_rubrik" sebagai ID unik
   edited_rubrik = st.data_editor(
-      st.session_state.df_rubrik, num_rows="dynamic", width="stretch"
+      st.session_state.df_rubrik, 
+      num_rows="dynamic", 
+      width="stretch",
+      key="tabel_rubrik" 
   )
 
   st.subheader("💰 2. Tabel Validasi Saving (8 Kategori)")
+  # Menambahkan parameter key="tabel_saving" sebagai ID unik
   edited_saving = st.data_editor(
-      st.session_state.df_saving, num_rows="dynamic", width="stretch"
+      st.session_state.df_saving, 
+      num_rows="dynamic", 
+      width="stretch",
+      key="tabel_saving"
   )
 
   output = io.BytesIO()
