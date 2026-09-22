@@ -46,8 +46,8 @@ except Exception as e:
   st.error(f"Gagal memuat API Key dari Secrets. Detail: {e}")
   st.stop()
 
-# Menggunakan model paling stabil untuk ekstraksi JSON saat ini
-MODEL_ID = "gemini-1.5-flash"
+# Mengunci model ke versi yang disepakati dan aktif
+MODEL_ID = "gemini-3.5-flash"
 
 # ==========================================
 # 2. INISIALISASI MEMORI SESI (SESSION STATE)
@@ -106,15 +106,12 @@ def bersihkan_dan_parse_json(teks_raw):
   if not teks_raw:
     return []
   
-  # 1. Bersihkan tanda format markdown secara paksa
   teks_bersih = re.sub(r"```json", "", teks_raw, flags=re.IGNORECASE)
   teks_bersih = re.sub(r"```", "", teks_bersih).strip()
   
-  # 2. Coba parse sebagai objek JSON standar
   try:
     data = json.loads(teks_bersih)
     if isinstance(data, dict):
-        # Jika AI membungkus dalam dictionary, misal {"hasil": [...]}, ekstrak list-nya
         for key, value in data.items():
             if isinstance(value, list):
                 return value
@@ -123,7 +120,6 @@ def bersihkan_dan_parse_json(teks_raw):
   except json.JSONDecodeError:
     pass
 
-  # 3. Jika gagal (ada teks ekstra), gunakan regex untuk memburu tanda kurung array [...]
   match = re.search(r'\[\s*\{.*?\}\s*\]', teks_raw, re.DOTALL)
   if match:
     try:
@@ -230,7 +226,6 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         if hasil_hakim_json:
           poin_manual = [7, 10, 11, 18, 19, 21]
           for item in hasil_hakim_json:
-            # Mencari nilai nomor kriteria meskipun AI menggunakan kapitalisasi berbeda
             nomor_kriteria = item.get("no", item.get("No", item.get("nomor", 0)))
             item["status validasi"] = (
                 "⚠️ VALIDASI MANUAL"
@@ -239,16 +234,13 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
             )
           
           df_r = pd.DataFrame(hasil_hakim_json)
-          # Menyeragamkan huruf kecil semua
           df_r.columns = df_r.columns.str.lower().str.strip()
           
-          # Memperbaiki nama kolom jika AI salah memberikan nama
           df_r.rename(columns={"nomor": "no", "score": "skor", "nilai": "skor", "alasan": "justifikasi", "keterangan": "justifikasi"}, inplace=True)
           
           cols = [c for c in ["no", "kriteria", "skor", "status validasi", "justifikasi"] if c in df_r.columns]
           st.session_state.df_rubrik = df_r[cols] if cols else df_r
         else:
-          # Fallback agar tabel tidak error 'empty' jika AI gagal
           st.session_state.df_rubrik = pd.DataFrame(columns=["no", "kriteria", "skor", "status validasi", "justifikasi"])
 
         if hasil_saving_json:
