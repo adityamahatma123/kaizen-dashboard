@@ -46,7 +46,8 @@ except Exception as e:
   st.error(f"Gagal memuat API Key dari Secrets. Detail: {e}")
   st.stop()
 
-MODEL_ID = "gemini-3.5-flash"
+# Menggunakan model paling stabil untuk ekstraksi JSON saat ini
+MODEL_ID = "gemini-1.5-flash"
 
 # ==========================================
 # 2. INISIALISASI MEMORI SESI (SESSION STATE)
@@ -66,9 +67,7 @@ if "nama_file" not in st.session_state:
 # ==========================================
 # 3. FUNGSI MESIN AI & PARSER (ANTI-ERROR)
 # ==========================================
-def panggil_ai_dengan_retry(
-    contents, deskripsi_agen, log_ui, maksimal_percobaan=3
-):
+def panggil_ai_dengan_retry(contents, deskripsi_agen, log_ui, maksimal_percobaan=3):
   """Eksekusi panggilan API dengan jeda anti-limit dan log langsung ke UI."""
   for percobaan in range(maksimal_percobaan):
     try:
@@ -103,20 +102,36 @@ def panggil_ai_dengan_retry(
 
 
 def bersihkan_dan_parse_json(teks_raw):
-  """Mengekstrak format JSON array dari respons teks AI secara aman."""
+  """Fungsi pembaca JSON yang agresif mencari pola array tabel."""
   if not teks_raw:
     return []
+  
+  # 1. Bersihkan tanda format markdown secara paksa
+  teks_bersih = re.sub(r"```json", "", teks_raw, flags=re.IGNORECASE)
+  teks_bersih = re.sub(r"```", "", teks_bersih).strip()
+  
+  # 2. Coba parse sebagai objek JSON standar
   try:
-    teks_bersih = re.sub(r"```json\s*|\s*```", "", teks_raw).strip()
-    return json.loads(teks_bersih)
-  except Exception:
-    match = re.search(r"(\[.*\]|\{.*\})", teks_raw, re.DOTALL)
-    if match:
-      try:
-        return json.loads(match.group(1))
-      except Exception:
-        return []
-    return []
+    data = json.loads(teks_bersih)
+    if isinstance(data, dict):
+        # Jika AI membungkus dalam dictionary, misal {"hasil": [...]}, ekstrak list-nya
+        for key, value in data.items():
+            if isinstance(value, list):
+                return value
+        return [data]
+    return data if isinstance(data, list) else []
+  except json.JSONDecodeError:
+    pass
+
+  # 3. Jika gagal (ada teks ekstra), gunakan regex untuk memburu tanda kurung array [...]
+  match = re.search(r'\[\s*\{.*?\}\s*\]', teks_raw, re.DOTALL)
+  if match:
+    try:
+      return json.loads(match.group(0))
+    except Exception:
+      pass
+      
+  return []
 
 
 # ==========================================
@@ -180,7 +195,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
             prompt_3, "Pengacara Pembela [3/5]", status_box
         )
 
-        # 4. Hakim Agung (Perbaikan Kurung Kurawal {{ }})
+        # 4. Hakim Agung 
         prompt_4 = f"""
         Fakta: {laporan_agen_1} | Kritik: {dakwaan_jaksa} | Pembelaan: {pembelaan_pengacara}
         Evaluasi 21 poin rubrik:
@@ -211,34 +226,37 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         if os.path.exists(temp_path):
           os.remove(temp_path)
 
+        # --- PEMROSESAN DATA TABEL ---
         if hasil_hakim_json:
           poin_manual = [7, 10, 11, 18, 19, 21]
           for item in hasil_hakim_json:
-            nomor_kriteria = item.get("no", item.get("No"))
+            # Mencari nilai nomor kriteria meskipun AI menggunakan kapitalisasi berbeda
+            nomor_kriteria = item.get("no", item.get("No", item.get("nomor", 0)))
             item["status validasi"] = (
                 "⚠️ VALIDASI MANUAL"
                 if nomor_kriteria in poin_manual
                 else "OTOMATIS AI"
             )
+          
           df_r = pd.DataFrame(hasil_hakim_json)
-          df_r.columns = df_r.columns.str.lower()
-          cols = [
-              c
-              for c in [
-                  "no",
-                  "kriteria",
-                  "skor",
-                  "status validasi",
-                  "justifikasi",
-              ]
-              if c in df_r.columns
-          ]
-          st.session_state.df_rubrik = df_r[cols]
+          # Menyeragamkan huruf kecil semua
+          df_r.columns = df_r.columns.str.lower().str.strip()
+          
+          # Memperbaiki nama kolom jika AI salah memberikan nama
+          df_r.rename(columns={"nomor": "no", "score": "skor", "nilai": "skor", "alasan": "justifikasi", "keterangan": "justifikasi"}, inplace=True)
+          
+          cols = [c for c in ["no", "kriteria", "skor", "status validasi", "justifikasi"] if c in df_r.columns]
+          st.session_state.df_rubrik = df_r[cols] if cols else df_r
+        else:
+          # Fallback agar tabel tidak error 'empty' jika AI gagal
+          st.session_state.df_rubrik = pd.DataFrame(columns=["no", "kriteria", "skor", "status validasi", "justifikasi"])
 
         if hasil_saving_json:
           df_s = pd.DataFrame(hasil_saving_json)
-          df_s.columns = df_s.columns.str.lower()
+          df_s.columns = df_s.columns.str.lower().str.strip()
           st.session_state.df_saving = df_s
+        else:
+          st.session_state.df_saving = pd.DataFrame(columns=["kategori", "status", "keterangan"])
 
         st.session_state.transkrip = [
             {"Peranan": "Ejen Pengekstrak", "Laporan": laporan_agen_1},
@@ -264,37 +282,23 @@ if st.session_state.proses_selesai:
   st.success("Analisis AI selesai! Silakan periksa dan validasi tabel di bawah.")
 
   st.subheader("📝 1. Tabel Validasi Rubrik (21 Poin)")
-  # Menambahkan parameter key="tabel_rubrik" sebagai ID unik
   edited_rubrik = st.data_editor(
-      st.session_state.df_rubrik, 
-      num_rows="dynamic", 
-      width="stretch",
-      key="tabel_rubrik" 
+      st.session_state.df_rubrik, num_rows="dynamic", width="stretch", key="tabel_rubrik"
   )
 
   st.subheader("💰 2. Tabel Validasi Saving (8 Kategori)")
-  # Menambahkan parameter key="tabel_saving" sebagai ID unik
   edited_saving = st.data_editor(
-      st.session_state.df_saving, 
-      num_rows="dynamic", 
-      width="stretch",
-      key="tabel_saving"
+      st.session_state.df_saving, num_rows="dynamic", width="stretch", key="tabel_saving"
   )
 
   output = io.BytesIO()
   with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
     if not edited_rubrik.empty:
-      edited_rubrik.to_excel(
-          writer, sheet_name="Hasil Penilaian Rubrik", index=False
-      )
+      edited_rubrik.to_excel(writer, sheet_name="Hasil Penilaian Rubrik", index=False)
     if not edited_saving.empty:
-      edited_saving.to_excel(
-          writer, sheet_name="Hasil Validasi Saving", index=False
-      )
+      edited_saving.to_excel(writer, sheet_name="Hasil Validasi Saving", index=False)
     if st.session_state.transkrip:
-      pd.DataFrame(st.session_state.transkrip).to_excel(
-          writer, sheet_name="Transkrip AI", index=False
-      )
+      pd.DataFrame(st.session_state.transkrip).to_excel(writer, sheet_name="Transkrip AI", index=False)
 
   excel_data = output.getvalue()
 
