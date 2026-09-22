@@ -44,7 +44,8 @@ def panggil_ai_dengan_retry(contents, deskripsi_agen, maksimal_percobaan=3):
         try:
             response = client.models.generate_content(model=MODEL_ID, contents=contents)
             time.sleep(12) 
-            return response.text
+            # PENAHAN ERROR: Pastikan selalu mengembalikan string, walaupun respons aslinya kosong (None)
+            return response.text if response.text else ""
         except Exception as e:
             if any(k in str(e) for k in ["503", "429", "RESOURCE_EXHAUSTED"]):
                 time.sleep(20)
@@ -54,6 +55,10 @@ def panggil_ai_dengan_retry(contents, deskripsi_agen, maksimal_percobaan=3):
                 time.sleep(10)
 
 def bersihkan_dan_parse_json(teks_raw):
+    # PENAHAN ERROR: Jika teks_raw kosong atau None, langsung kembalikan list kosong tanpa memproses RegEx
+    if not teks_raw:
+        return []
+        
     try:
         teks_bersih = re.sub(r'```json\s*|\s*```', '', teks_raw).strip()
         return json.loads(teks_bersih)
