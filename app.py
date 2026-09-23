@@ -51,8 +51,12 @@ except Exception as e:
   st.error(f"Gagal memuat API Key dari Secrets. Detail: {e}")
   st.stop()
 
-# Model yang digunakan (Gemini 3.5 Flash - GA)
-MODEL_ID = "gemini-3.5-flash"
+# Model yang digunakan. "Lite" dipilih karena free tier-nya jauh lebih
+# longgar (15 request/menit) dibanding gemini-3.5-flash biasa (cuma 5
+# request/menit) — penting karena alur ini melakukan 5 panggilan berurutan
+# per dokumen. Kalau nanti sudah mengaktifkan billing dan ingin kualitas
+# penalaran lebih dalam, ganti kembali ke "gemini-3.5-flash".
+MODEL_ID = "gemini-3.5-flash-lite"
 
 # Parameter untuk memaksimalkan KONSISTENSI hasil antar-run.
 # CATATAN PENTING: temperature=0 + top_k=1 TIDAK direkomendasikan untuk
