@@ -54,19 +54,20 @@ except Exception as e:
 # Model yang digunakan (Gemini 3.5 Flash - GA)
 MODEL_ID = "gemini-3.5-flash"
 
-# Parameter untuk memaksimalkan KONSISTENSI hasil antar-run
+# Parameter untuk memaksimalkan KONSISTENSI hasil antar-run.
+# CATATAN PENTING: temperature=0 + top_k=1 TIDAK direkomendasikan untuk
+# model Gemini 3.x (termasuk gemini-3.5-flash) karena model ini punya mode
+# "thinking" internal — kombinasi itu bisa membuat model terjebak di proses
+# berpikir tanpa pernah mengeluarkan jawaban akhir (response.text jadi
+# kosong). Gunakan thinking_level + seed sebagai gantinya.
 GENERATION_CONFIG_TEXT = types.GenerateContentConfig(
-    temperature=0,
-    top_p=1,
-    top_k=1,
     seed=42,
+    thinking_config=types.ThinkingConfig(thinking_level="low"),
 )
 
 GENERATION_CONFIG_JSON = types.GenerateContentConfig(
-    temperature=0,
-    top_p=1,
-    top_k=1,
     seed=42,
+    thinking_config=types.ThinkingConfig(thinking_level="low"),
     response_mime_type="application/json",
 )
 
@@ -115,12 +116,31 @@ def panggil_ai_dengan_retry(
       response = client.models.generate_content(
           model=MODEL_ID, contents=contents, config=config
       )
+      teks_hasil = response.text if response and response.text else ""
+      if not teks_hasil:
+        finish_reason = None
+        try:
+          finish_reason = response.candidates[0].finish_reason
+        except Exception:
+          pass
+        log_ui.write(
+            f"❗ **{deskripsi_agen}:** Jawaban KOSONG dari model"
+            f" (finish_reason: {finish_reason}). Mencoba ulang..."
+        )
+        if percobaan == maksimal_percobaan - 1:
+          log_ui.write(
+              f"❌ **{deskripsi_agen}:** Tetap kosong setelah"
+              f" {maksimal_percobaan}x percobaan."
+          )
+          return ""
+        time.sleep(8)
+        continue
       log_ui.write(
           f"✅ **{deskripsi_agen}:** Selesai! Pendinginan 12 detik"
           " (Anti-Limit)..."
       )
       time.sleep(12)
-      return response.text if response and response.text else ""
+      return teks_hasil
     except Exception as e:
       pesan_error = str(e).upper()
       if any(
