@@ -136,29 +136,38 @@ def panggil_ai_dengan_retry(
         time.sleep(8)
         continue
       log_ui.write(
-          f"✅ **{deskripsi_agen}:** Selesai! Pendinginan 12 detik"
-          " (Anti-Limit)..."
+          f"✅ **{deskripsi_agen}:** Selesai! Pendinginan 15 detik"
+          " (menjaga di bawah limit 5 request/menit free tier)..."
       )
-      time.sleep(12)
+      time.sleep(15)
       return teks_hasil
     except Exception as e:
-      pesan_error = str(e).upper()
+      pesan_error_asli = str(e)
+      pesan_error_upper = pesan_error_asli.upper()
       if any(
-          k in pesan_error
+          k in pesan_error_upper
           for k in ["503", "429", "RESOURCE_EXHAUSTED", "UNAVAILABLE"]
       ):
         log_ui.write(
-            f"⚠️ **{deskripsi_agen}:** Peladen sibuk. Menunggu 20 detik..."
+            f"⚠️ **{deskripsi_agen}:** Kena limit rate (kemungkinan 5"
+            f" request/menit free tier terlampaui). Detail:"
+            f" `{pesan_error_asli[:300]}`. Menunggu 65 detik agar masuk"
+            " jendela menit berikutnya..."
         )
-        time.sleep(20)
+        time.sleep(65)
       else:
         if percobaan == maksimal_percobaan - 1:
           raise
         log_ui.write(
-            f"⚠️ **{deskripsi_agen}:** Mencoba ulang"
-            f" ({percobaan + 2}/{maksimal_percobaan})..."
+            f"⚠️ **{deskripsi_agen}:** Error: `{pesan_error_asli[:300]}`."
+            f" Mencoba ulang ({percobaan + 2}/{maksimal_percobaan})..."
         )
         time.sleep(10)
+  log_ui.write(
+      f"❌ **{deskripsi_agen}:** Menyerah setelah {maksimal_percobaan}x"
+      " percobaan (kemungkinan kuota/rate limit API habis — cek Google AI"
+      " Studio / billing akun Gemini-mu)."
+  )
   return ""
 
 
@@ -325,8 +334,22 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis:
         )
         hasil_saving_json = bersihkan_dan_parse_json(raw_analis)
 
+        ada_yang_gagal = not all([
+            laporan_agen_1,
+            dakwaan_jaksa,
+            pembelaan_pengacara,
+            raw_hakim,
+            raw_analis,
+        ])
         status_box.update(
-            label="✅ Analisis Selesai!", state="complete", expanded=False
+            label=(
+                "⚠️ Selesai dengan beberapa agen gagal — lihat detail di"
+                " bawah"
+                if ada_yang_gagal
+                else "✅ Analisis Selesai!"
+            ),
+            state="complete" if not ada_yang_gagal else "error",
+            expanded=ada_yang_gagal,
         )
 
         # --- PEMROSESAN DATA TABEL ---
