@@ -435,6 +435,24 @@ if st.session_state.proses_selesai:
       " poin bertanda ⚠️ WAJIB divalidasi manual sebelum diunduh."
   )
 
+  # Peringatan permanen jika ada agen yang gagal menghasilkan jawaban,
+  # supaya tidak perlu bongkar transkrip / log status untuk tahu masalahnya.
+  agen_kosong = [
+      entri["Peranan"]
+      for entri in st.session_state.transkrip
+      if not str(entri.get("Laporan", "")).strip()
+  ]
+  if agen_kosong:
+    st.warning(
+        "⚠️ Agen berikut TIDAK menghasilkan jawaban (kemungkinan diblokir"
+        " safety filter, kehabisan kuota, atau macet di proses berpikir"
+        " model):\n\n"
+        + "\n".join(f"- {nama}" for nama in agen_kosong)
+        + "\n\nTabel di bawah mungkin kosong/tidak lengkap akibat ini."
+        " Coba jalankan ulang, atau cek log saat proses berjalan untuk"
+        " detail `finish_reason`."
+    )
+
   st.subheader("📝 1. Tabel Validasi Rubrik (21 Poin)")
   st.caption(
       "Kolom **skor_ai** adalah skor asli dari AI (jangan diubah, sebagai"
