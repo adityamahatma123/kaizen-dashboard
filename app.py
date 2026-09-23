@@ -160,6 +160,10 @@ if "proses_selesai" not in st.session_state:
   st.session_state.proses_selesai = False
 if "df_rubrik" not in st.session_state:
   st.session_state.df_rubrik = pd.DataFrame()
+if "df_alur_logika" not in st.session_state:
+  st.session_state.df_alur_logika = pd.DataFrame()
+if "df_verifikasi" not in st.session_state:
+  st.session_state.df_verifikasi = pd.DataFrame()
 if "df_saving" not in st.session_state:
   st.session_state.df_saving = pd.DataFrame()
 if "transkrip" not in st.session_state:
@@ -345,38 +349,94 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
             " jelas 'TIDAK DITEMUKAN' — jangan mengarang."
         )
         laporan_agen_1 = panggil_ai_dengan_retry(
-            [gemini_file, prompt_1], "Pengekstrak Bukti [1/5]", status_box
+            [gemini_file, prompt_1], "Pengekstrak Bukti [1/7]", status_box
         )
 
-        # --- 2. Jaksa (Kritik) ---
+        # --- 2. Verifikator Bukti Visual & Kelayakan (multimodal) ---
+        # Agen ini WAJIB punya akses langsung ke file PDF (bukan cuma teks
+        # ringkasan) karena tugasnya melihat foto/gambar secara visual dan
+        # menilai kelayakan dasar proyek — dua hal yang tidak bisa dicek
+        # dari ringkasan teks Pengekstrak saja.
+        prompt_verifikasi = """Kamu adalah verifikator senior yang SANGAT KRITIS terhadap kualitas dasar submission Kaizen. Banyak peserta kompetisi ini belum paham konsep PDCA dengan baik, dan beberapa submission bahkan BUKAN merupakan proyek improvement sama sekali (misal: cuma laporan rutin, pengadaan barang tanpa problem-solving, atau aktivitas maintenance biasa yang dibungkus format Kaizen). Tugasmu membongkar ini dengan membaca LANGSUNG dokumen PDF (termasuk semua foto/gambar/diagram di dalamnya), bukan cuma ringkasan.
+
+Lakukan 3 pemeriksaan berikut:
+
+## A. GATE CHECK — Kelayakan sebagai Proyek Improvement
+Apakah dokumen ini benar-benar proyek continuous improvement yang valid? Tanda-tanda TIDAK LAYAK: tidak ada kondisi awal/masalah yang didefinisikan dengan jelas, tidak ada perubahan before-after yang nyata, tidak ada analisis akar masalah sama sekali (langsung lompat ke solusi), atau isinya sebenarnya laporan administratif/aktivitas rutin yang dipaksakan ke format Kaizen. Beri verdict: "LAYAK" (jelas proyek improvement yang sah), "PERLU PERHATIAN" (ada keraguan, perlu ditinjau juri), atau "TIDAK LAYAK" (bukan proyek improvement).
+
+## B. KEBENARAN SEMANTIK 5W1H
+Untuk MASING-MASING elemen (What, Where, When, Who, Why, How — atau elemen serupa yang dipakai dokumen), periksa apakah ISI yang dituliskan benar-benar menjawab pertanyaan elemen itu, bukan cuma ada teks di kolomnya. Contoh kesalahan yang harus ditangkap: isi kolom "How" sebenarnya menjelaskan "Where" (lokasi), atau isi "Which"/kolom lain tertukar dengan elemen lain. Tandai tiap elemen SESUAI atau TERTUKAR/TIDAK SESUAI dengan penjelasan spesifik.
+
+## C. AUDIT FOTO & BUKTI VISUAL
+Untuk SETIAP foto/gambar/diagram penting yang kamu lihat di dokumen (terutama foto before/after, dan diagram fishbone/flow), deskripsikan singkat apa yang benar-benar terlihat di foto itu, lalu bandingkan dengan klaim teks di sekitarnya. Tandai SESUAI kalau foto benar-benar mendukung klaim (misal foto "before" menunjukkan kondisi rusak/bermasalah yang dideskripsikan, foto "after" menunjukkan perbaikan yang sama), atau MERAGUKAN kalau foto tidak jelas mendukung klaim, tidak relevan, tampak diambil dari konteks lain, atau foto before/after terlihat identik/tidak menunjukkan perubahan nyata.
+
+Keluarkan HANYA JSON array valid (satu array datar berisi semua temuan A+B+C, dibedakan lewat field "kategori"), dengan skema persis:
+[{"kategori": "GATE CHECK", "item": "Kelayakan Proyek Improvement", "status": "LAYAK", "catatan": "alasan spesifik merujuk isi dokumen"}, {"kategori": "5W1H", "item": "How", "status": "TERTUKAR/TIDAK SESUAI", "catatan": "isi kolom How sebenarnya menjelaskan lokasi (Where), bukan metode"}, {"kategori": "FOTO", "item": "Foto halaman 8 (before)", "status": "SESUAI", "catatan": "menunjukkan kondisi mesin sesuai deskripsi masalah"}]"""
+        raw_verifikasi = panggil_ai_dengan_retry(
+            [gemini_file, prompt_verifikasi],
+            "Verifikator Bukti & Kelayakan [2/7]",
+            status_box,
+            config=GENERATION_CONFIG_JSON,
+        )
+        hasil_verifikasi_json = bersihkan_dan_parse_json(raw_verifikasi)
+
+        # --- 3. Pelacak Alur Logika (Traceability/Golden Thread PDCA) ---
+        prompt_alur = f"""Kamu adalah auditor senior metodologi Kaizen/PDCA yang bertugas menelusuri "benang merah" (golden thread) logika perbaikan — apakah tiap tahap benar-benar tersambung secara MASUK AKAL secara teknis/operasional ke tahap sebelumnya, bukan cuma nyambung secara kata-kata di permukaan.
+
+Gunakan pengetahuan umum troubleshooting industri sebagai patokan kewajaran hubungan sebab-akibat. Contoh pola yang MASUK AKAL: "mesin macet" -> kenapa? "bearing aus" -> kenapa? "kurang pelumasan" -> kenapa? "tidak ada jadwal preventive maintenance". Contoh loncatan yang TIDAK MASUK AKAL: "mesin macet" tiba-tiba dijawab "operator kurang training" tanpa ada penjelasan penghubung antara dua hal itu.
+
+DATA HASIL EKSTRAKSI DOKUMEN:
+{laporan_agen_1}
+
+HASIL VERIFIKASI KEBENARAN 5W1H & FOTO (pakai ini sebagai bahan tambahan, terutama untuk titik 1 di bawah — kalau ada elemen 5W1H yang TERTUKAR, itu otomatis bikin problem statement TIDAK bisa dianggap KONSISTEN):
+{raw_verifikasi}
+
+Telusuri dan evaluasi titik-titik sambungan berikut SATU PER SATU:
+1. "5W1H ke Problem Statement": apakah rangkuman masalah mencerminkan semua elemen 5W1H yang dilaporkan DENGAN BENAR (bukan cuma lengkap, tapi juga tidak ada elemen yang tertukar/salah tempat sesuai hasil verifikasi di atas), tidak ada yang hilang/melenceng?
+2. "Problem Statement ke Kepala Ikan Fishbone": apakah efek/masalah utama di kepala ikan fishbone SAMA dengan problem statement di atas, atau melenceng ke masalah lain?
+3. "Kategori 4M pada Fishbone": untuk SETIAP cabang, apakah penyebabnya masuk akal ditempatkan di kategori 4M itu? Sebutkan SPESIFIK cabang mana yang salah kategori kalau ada (misal: soal alat/mesin dimasukkan ke Man).
+4. "Rantai Why-Why": untuk SETIAP pasangan why berurutan, apakah why berikutnya benar-benar penyebab TEKNIS LANGSUNG dari why sebelumnya (bukan cuma berkaitan tema)? Sebutkan link why-ke-berapa yang lemah/meloncat kalau ada.
+5. "Root Cause vs Fishbone": apakah root cause akhir dari why-why itu memang salah satu cabang di fishbone, bukan topik baru yang tidak pernah disebut?
+6. "Root Cause ke Action Plan": apakah action plan yang diajukan menyasar ROOT CAUSE AKHIR (why paling dalam), bukan cuma menambal gejala di why tingkat awal?
+7. "Action Plan ke Standardisasi": apakah dokumen standar (SOP/IK/OPL/dst) yang dibuat memang relevan dan mengunci action plan itu supaya tidak terulang?
+8. "Target Awal ke Hasil Akhir": apakah angka target di awal benar-benar dijawab hasil akhir yang dilaporkan, tanpa pergeseran target yang tidak dijelaskan?
+
+Untuk tiap titik, beri verdict SALAH SATU dari: "KONSISTEN" (jelas dan masuk akal), "LEMAH" (ada tapi kurang detail/agak dipaksakan), atau "TIDAK KONSISTEN" (ada loncatan logika/tidak nyambung/tidak ditemukan).
+
+Keluarkan HANYA JSON array valid dengan skema persis:
+[{{"no": 1, "tahap": "5W1H ke Problem Statement", "verdict": "KONSISTEN", "temuan": "penjelasan spesifik merujuk isi dokumen"}}]"""
+        raw_alur_logika = panggil_ai_dengan_retry(
+            prompt_alur,
+            "Pelacak Alur Logika [3/7]",
+            status_box,
+            config=GENERATION_CONFIG_JSON,
+        )
+        hasil_alur_json = bersihkan_dan_parse_json(raw_alur_logika)
+
+        # --- 3. Jaksa (Kritik) ---
         prompt_2 = (
             "Kamu berperan sebagai Jaksa yang skeptis dan sangat teliti"
             " dalam audit Kaizen. Tugasmu mencari kelemahan KOHERENSI dan"
             " LOGIKA, bukan cuma kelengkapan administratif, berdasarkan"
             " fakta yang ada (jangan mengarang tuduhan).\n\n"
             f"Fakta Kasus:\n{laporan_agen_1}\n\n"
-            "Periksa dan pertanyakan secara spesifik:\n"
-            "- 5 WHYS: apakah tiap 'why' benar-benar jawaban logis dari"
-            " 'why' sebelumnya, atau ada loncatan logika/tidak nyambung?"
-            " Apakah root cause akhirnya konsisten dengan salah satu"
-            " cabang di fishbone, atau malah menyebut hal baru yang tidak"
-            " muncul di fishbone?\n"
-            "- FISHBONE/4M: apakah ada penyebab yang salah kategori (misal"
-            " soal mesin dimasukkan ke kategori Man)? Apakah ada faktor 4M"
-            " yang jelas relevan tapi tidak dibahas sama sekali?\n"
-            "- TARGET VS HASIL: apakah angka hasil akhir benar-benar"
-            " menjawab target awal, atau targetnya bergeser tanpa"
-            " penjelasan?\n"
+            "HASIL AUDIT ALUR LOGIKA (dari Pelacak Alur Logika, jadikan"
+            f" bahan utama kritikmu):\n{raw_alur_logika}\n\n"
+            "Periksa dan pertanyakan secara spesifik, dengan mengacu ke"
+            " hasil audit alur logika di atas:\n"
+            "- Titik mana saja yang berstatus 'LEMAH' atau 'TIDAK"
+            " KONSISTEN' — jelaskan kenapa itu masalah serius untuk"
+            " kredibilitas penilaian.\n"
             "- Kelemahan bukti, celah antara masalah dan solusi, kurangnya"
             " data pendukung, atau potensi manipulasi angka saving.\n\n"
             "Sertakan alasan yang merujuk ke fakta di atas untuk tiap"
             " temuan."
         )
         dakwaan_jaksa = panggil_ai_dengan_retry(
-            prompt_2, "Jaksa Penilai [2/5]", status_box
+            prompt_2, "Jaksa Penilai [4/7]", status_box
         )
 
-        # --- 3. Pembela ---
+        # --- 5. Pembela ---
         prompt_3 = (
             "Kamu berperan sebagai Pengacara Pembela dalam audit Kaizen."
             " Tugasmu membela HANYA berdasarkan fakta yang tersedia, bukan"
@@ -386,16 +446,18 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
             " sudah terbukti dari fakta di atas."
         )
         pembelaan_pengacara = panggil_ai_dengan_retry(
-            prompt_3, "Pengacara Pembela [3/5]", status_box
+            prompt_3, "Pengacara Pembela [5/7]", status_box
         )
 
-        # --- 4. Hakim Agung (Skoring 21 Poin) ---
+        # --- 6. Hakim Agung (Skoring 21 Poin) ---
         prompt_4 = f"""Kamu adalah Hakim Agung penilaian Kaizen yang wajib bersikap objektif, konsisten, dan KRITIS TERHADAP ISI — bukan cuma mengecek "ada/tidak ada elemen", tapi memverifikasi apakah isinya benar secara logika, tepat kategorinya, dan nyambung alur PDCA-nya.
 
 ATURAN PENILAIAN:
 - Beri skor SESUAI pilihan yang tersedia per kriteria (jangan beri skor di luar pilihan yang tercantum di rubrik).
 - Ikuti PERSIS deskripsi tiap tingkat skor di rubrik di bawah — jangan menebak sendiri artinya.
-- Untuk kriteria yang punya instruksi "WAJIB PERIKSA..." di rubrik, benar-benar lakukan analisis mendalam itu (misal: telusuri logika tiap baris 5 Whys, cek kesesuaian kategori 4M per cabang fishbone, bandingkan angka target vs hasil akhir) — jangan cuma cek keberadaan elemen.
+- Untuk kriteria 1, 2, 3, dan 4 (5G, Losses Measurement, 5W1H, Visualisasi), jadikan HASIL VERIFIKASI 5W1H & FOTO di bawah sebagai bahan utama — kalau ada elemen 5W1H yang "TERTUKAR/TIDAK SESUAI" atau foto yang "MERAGUKAN", skor kriteria terkait WAJIB ikut diturunkan meski secara sepintas terlihat "ada isinya".
+- Untuk kriteria 6, 7, 8, 10, dan 16, jadikan HASIL AUDIT ALUR LOGIKA di bawah sebagai bahan utama penilaian — kalau audit menyatakan "TIDAK KONSISTEN" atau "LEMAH" pada titik yang relevan, skor kriteria itu WAJIB ikut diturunkan dan justifikasi WAJIB menyebutkan temuan spesifik dari audit tersebut.
+- Kalau GATE CHECK di hasil verifikasi menyatakan "TIDAK LAYAK" (bukan proyek improvement), sebutkan ini secara eksplisit di justifikasi kriteria 1-5 (tahap Plan) karena ini mempengaruhi validitas keseluruhan submission — tapi tetap beri skor per kriteria sesuai bukti yang ada (jangan otomatis nol semua tanpa dasar).
 - Justifikasi WAJIB spesifik dan merujuk isi konkret dari dokumen (kutip singkat bagian relevan bila perlu), bukan opini umum seperti "sudah lengkap" atau "ada bukti".
 - Bersikap ketat: skor tinggi hanya untuk bukti yang benar-benar kuat, lengkap, DAN koheren secara logika.
 
@@ -405,23 +467,29 @@ RUBRIK LENGKAP (deskripsi tiap tingkat skor):
 FAKTA HASIL EKSTRAKSI DOKUMEN:
 {laporan_agen_1}
 
+HASIL VERIFIKASI KELAYAKAN, 5W1H & FOTO (pakai untuk kriteria 1-5 dan sebagai konteks kelayakan keseluruhan):
+{raw_verifikasi}
+
+HASIL AUDIT ALUR LOGIKA (golden thread PDCA — pakai ini terutama untuk kriteria 6, 7, 8, 10, 16):
+{raw_alur_logika}
+
 KRITIK JAKSA (pertimbangkan temuan ini dalam penilaian):
 {dakwaan_jaksa}
 
 PEMBELAAN:
 {pembelaan_pengacara}
 
-Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifikasi harus spesifik dan merujuk isi dokumen, minimal 1-2 kalimat menjelaskan MENGAPA skor itu diberikan berdasarkan analisis koherensi, bukan cuma "ada evidence"):
+Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifikasi harus spesifik dan merujuk isi dokumen serta hasil audit alur logika/verifikasi, minimal 1-2 kalimat menjelaskan MENGAPA skor itu diberikan berdasarkan analisis koherensi, bukan cuma "ada evidence"):
 [{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik merujuk isi dokumen dan analisis koherensi"}}]"""
         raw_hakim = panggil_ai_dengan_retry(
             prompt_4,
-            "Hakim Agung [4/5]",
+            "Hakim Agung [6/7]",
             status_box,
             config=GENERATION_CONFIG_JSON,
         )
         hasil_hakim_json = bersihkan_dan_parse_json(raw_hakim)
 
-        # --- 5. Analis Impact ---
+        # --- 7. Analis Dampak ---
         daftar_kategori_str = ", ".join(KATEGORI_IMPACT_14)
         prompt_5 = (
             "Kamu adalah Analis Impact yang menilai dampak operasional dari"
@@ -448,7 +516,7 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifik
         )
         raw_analis = panggil_ai_dengan_retry(
             [gemini_file, prompt_5],
-            "Analis Dampak [5/5]",
+            "Analis Dampak [7/7]",
             status_box,
             config=GENERATION_CONFIG_JSON,
         )
@@ -456,6 +524,8 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifik
 
         ada_yang_gagal = not all([
             laporan_agen_1,
+            raw_verifikasi,
+            raw_alur_logika,
             dakwaan_jaksa,
             pembelaan_pengacara,
             raw_hakim,
@@ -473,6 +543,24 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifik
         )
 
         # --- PEMROSESAN DATA TABEL ---
+        if hasil_verifikasi_json:
+          df_v = pd.DataFrame(hasil_verifikasi_json)
+          df_v.columns = df_v.columns.str.lower().str.strip()
+          st.session_state.df_verifikasi = df_v
+        else:
+          st.session_state.df_verifikasi = pd.DataFrame(
+              columns=["kategori", "item", "status", "catatan"]
+          )
+
+        if hasil_alur_json:
+          df_a = pd.DataFrame(hasil_alur_json)
+          df_a.columns = df_a.columns.str.lower().str.strip()
+          st.session_state.df_alur_logika = df_a
+        else:
+          st.session_state.df_alur_logika = pd.DataFrame(
+              columns=["no", "tahap", "verdict", "temuan"]
+          )
+
         if hasil_hakim_json:
           for item in hasil_hakim_json:
             nomor_kriteria = item.get(
@@ -540,6 +628,11 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifik
 
         st.session_state.transkrip = [
             {"Peran": "Agen Pengekstrak", "Laporan": laporan_agen_1},
+            {
+                "Peran": "Agen Verifikator Bukti & Kelayakan",
+                "Laporan": raw_verifikasi,
+            },
+            {"Peran": "Agen Pelacak Alur Logika", "Laporan": raw_alur_logika},
             {"Peran": "Agen Jaksa Penilai", "Laporan": dakwaan_jaksa},
             {
                 "Peran": "Agen Pengacara Pembela",
@@ -596,6 +689,68 @@ if st.session_state.proses_selesai:
         " detail `finish_reason`."
     )
 
+  # Ambil verdict gate check untuk ditampilkan sebagai banner besar paling
+  # atas, supaya juri bisa triase cepat: layak dinilai detail atau tidak.
+  verdict_gate = None
+  alasan_gate = ""
+  if not st.session_state.df_verifikasi.empty:
+    baris_gate = st.session_state.df_verifikasi[
+        st.session_state.df_verifikasi.get("kategori", pd.Series(dtype=str))
+        .astype(str)
+        .str.upper()
+        == "GATE CHECK"
+    ]
+    if not baris_gate.empty:
+      verdict_gate = str(baris_gate.iloc[0].get("status", "")).upper()
+      alasan_gate = str(baris_gate.iloc[0].get("catatan", ""))
+
+  if verdict_gate == "TIDAK LAYAK":
+    st.error(
+        f"🚫 **GATE CHECK: TIDAK LAYAK sebagai proyek improvement.**"
+        f" {alasan_gate}\n\nTinjau ulang apakah submission ini memang"
+        " layak dinilai sebagai Kaizen, sebelum melanjutkan ke skor"
+        " detail di bawah."
+    )
+  elif verdict_gate == "PERLU PERHATIAN":
+    st.warning(
+        f"⚠️ **GATE CHECK: PERLU PERHATIAN.** {alasan_gate}\n\nBukan"
+        " berarti otomatis gugur, tapi juri disarankan meninjau langsung"
+        " bagian ini sebelum finalisasi skor."
+    )
+  elif verdict_gate == "LAYAK":
+    st.success(f"✅ **GATE CHECK: LAYAK sebagai proyek improvement.** {alasan_gate}")
+
+  st.subheader("🔍 -1. Verifikasi Kelayakan, Kebenaran 5W1H & Bukti Foto")
+  st.caption(
+      "Hasil dari agen yang membaca LANGSUNG file PDF (termasuk foto/"
+      "gambar di dalamnya) — bukan cuma ringkasan teks. Kolom **status**"
+      " 'TERTUKAR/TIDAK SESUAI' atau 'MERAGUKAN' berarti ada isi yang"
+      " keliru ditempatkan atau foto yang tidak benar-benar mendukung"
+      " klaim di sekitarnya."
+  )
+  edited_verifikasi = st.data_editor(
+      st.session_state.df_verifikasi,
+      num_rows="dynamic",
+      use_container_width=True,
+      key="tabel_verifikasi",
+  )
+
+  st.subheader("🔗 0. Audit Alur Logika PDCA (Golden Thread)")
+  st.caption(
+      "Menelusuri apakah tiap tahap (5W1H → Problem Statement → Kepala"
+      " Ikan → Kategori 4M → Rantai Why-Why → Root Cause → Action Plan →"
+      " Standardisasi → Target vs Hasil) benar-benar tersambung logis,"
+      " bukan cuma sama-sama ada. **LEMAH/TIDAK KONSISTEN** di sini jadi"
+      " dasar penurunan skor kriteria 6, 7, 8, 10, dan 16 di tabel rubrik"
+      " bawah."
+  )
+  edited_alur = st.data_editor(
+      st.session_state.df_alur_logika,
+      num_rows="dynamic",
+      use_container_width=True,
+      key="tabel_alur_logika",
+  )
+
   st.subheader("📝 1. Tabel Validasi Rubrik (21 Poin)")
   st.caption(
       "Kolom **skor_ai** adalah skor asli dari AI (jangan diubah, sebagai"
@@ -638,6 +793,14 @@ if st.session_state.proses_selesai:
 
   output = io.BytesIO()
   with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+    if not edited_verifikasi.empty:
+      edited_verifikasi.to_excel(
+          writer, sheet_name="Verifikasi 5W1H & Foto", index=False
+      )
+    if not edited_alur.empty:
+      edited_alur.to_excel(
+          writer, sheet_name="Audit Alur Logika", index=False
+      )
     if not edited_rubrik.empty:
       edited_rubrik.to_excel(
           writer, sheet_name="Hasil Penilaian Rubrik", index=False
@@ -656,7 +819,7 @@ if st.session_state.proses_selesai:
   col1, col2 = st.columns(2)
   with col1:
     st.download_button(
-        label="📥 Unduh Laporan Lengkap (Excel 3 Sheet)",
+        label="📥 Unduh Laporan Lengkap (Excel 5 Sheet)",
         data=excel_data,
         file_name=f"Laporan_Kaizen_{st.session_state.nama_file}.xlsx",
         mime=(
@@ -667,6 +830,8 @@ if st.session_state.proses_selesai:
   with col2:
     if st.button("🔄 Unggah Dokumen Baru (Reset)"):
       st.session_state.proses_selesai = False
+      st.session_state.df_verifikasi = pd.DataFrame()
+      st.session_state.df_alur_logika = pd.DataFrame()
       st.session_state.df_rubrik = pd.DataFrame()
       st.session_state.df_saving = pd.DataFrame()
       st.session_state.transkrip = []
