@@ -64,14 +64,18 @@ MODEL_ID = "gemini-3.5-flash-lite"
 # "thinking" internal — kombinasi itu bisa membuat model terjebak di proses
 # berpikir tanpa pernah mengeluarkan jawaban akhir (response.text jadi
 # kosong). Gunakan thinking_level + seed sebagai gantinya.
+# thinking_level="medium" dipakai (bukan "low") karena penilaian sekarang
+# butuh penalaran mendalam: memverifikasi rantai logika 5 Whys, ketepatan
+# kategori 4M pada fishbone, dan konsistensi target-vs-hasil — bukan cuma
+# mengecek ada/tidaknya elemen.
 GENERATION_CONFIG_TEXT = types.GenerateContentConfig(
     seed=42,
-    thinking_config=types.ThinkingConfig(thinking_level="low"),
+    thinking_config=types.ThinkingConfig(thinking_level="medium"),
 )
 
 GENERATION_CONFIG_JSON = types.GenerateContentConfig(
     seed=42,
-    thinking_config=types.ThinkingConfig(thinking_level="low"),
+    thinking_config=types.ThinkingConfig(thinking_level="medium"),
     response_mime_type="application/json",
 )
 
@@ -85,6 +89,68 @@ POIN_VALIDASI_MANUAL = {
     19: "Validasi Standardisasi — perlu verifikasi implementasi di lapangan",
     21: "Replikasi — perlu konfirmasi area lain yang benar-benar direplikasi",
 }
+
+# Rubrik 21 poin PERSIS dari dokumen manual "Rubrik Penilaian Kaizen 2026 —
+# Bagian II". Deskripsi tiap tingkat skor disertakan lengkap (bukan cuma
+# nama kriteria) supaya AI menilai berdasarkan definisi asli, bukan
+# tebakan generik "ada/tidak ada".
+RUBRIK_21_POIN_DETAIL = """
+TAHAP PLAN — 1. Definisikan Masalah & Tentukan Target
+1. 5G — 0: Tidak ada evidence | 1: Ada evidence tapi tidak relevan dengan masalah | 2: Ada evidence dan relevan dengan masalah
+2. Losses Measurement (bagian dari 5W1H) — 0: Tidak ada losses measurement masalah | 1: Ada tapi tidak relevan dengan masalah | 2: Ada dan relevan dengan masalah
+3. Kelengkapan 5W1H — 0: Tidak memenuhi semua kriteria 5W1H | 1: Sebagian memenuhi kriteria 5W1H | 2: Memenuhi semua kriteria 5W1H
+4. Visualisasi/Sketch fenomena — 0: Tidak ada penjabaran dan fenomena | 1: Ada tapi tidak relevan dengan masalah | 2: Ada dan relevan dengan masalah
+5. Target SMART — 0: Tidak memenuhi SMART & tidak sejalan dengan deskripsi masalah | 2: Semua penjabaran memenuhi SMART & sejalan dengan deskripsi masalah (kriteria ini TIDAK punya opsi skor 1)
+
+TAHAP PLAN — 2. Klasifikasi Potensi Sumber Masalah
+6. Fishbone Diagram/4M — 0: Tidak memiliki fishbone diagram/4M | 1: Fishbone dibuat namun belum lengkap/analisa dangkal | 2: Fishbone dibuat dengan sistematis dan lengkap
+7. Pemetaan 4M pada fishbone — 0: Pemetaan 4M belum tepat pada fishbone | 1: Sebagian pemetaan 4M sudah tepat | 2: Pemetaan 4M sudah SELURUHNYA tepat
+   WAJIB PERIKSA MENDETAIL: untuk SETIAP cabang/duri pada fishbone, tentukan apakah penyebab itu ditempatkan pada kategori 4M yang BENAR (Man/Method/Machine/Material). Contoh kesalahan umum: penyebab soal alat/mesin dimasukkan ke kategori Man, atau penyebab soal prosedur dimasukkan ke Material. Sebutkan eksplisit kalau menemukan kesalahan kategori.
+
+TAHAP PLAN — 3. Deteksi Sumber Masalah
+8. Hubungan Akar Penyebab (Why-Why Analysis / 5 Whys) — 0: Hubungan akar penyebab tidak relevan dan tidak terkait | 1: Sebagian hubungan akar penyebab saling terkait dan benar | 2: Semua hubungan akar penyebab saling terkait dan benar
+   WAJIB PERIKSA RANTAI LOGIKA 5 WHYS SECARA TEKSTUAL, bukan cuma cek "ada 5 baris why": baca isi tiap why satu per satu, verifikasi apakah jawaban why ke-N benar-benar PENYEBAB LANGSUNG dari why ke-(N-1). Kalau ada loncatan logika / why yang tidak nyambung, turunkan skor meski jumlah why-nya lengkap 5. Verifikasi juga apakah akar masalah akhir dari rantai why ini benar-benar terhubung ke salah satu cabang/duri di fishbone (kepala ikan/masalah utama) — kalau topik akhirnya tidak muncul sama sekali di fishbone, itu indikasi inkonsistensi antar tools dan HARUS disebutkan. Pertimbangkan juga apakah ada kemungkinan faktor 4M lain yang relevan tapi terlewat/tidak dieksplorasi sama sekali.
+9. Bukti Akar Penyebab — 0: Tidak ada bukti (data pendukung/visualisasi) | 3: Sebagian akar penyebab dapat dibuktikan melalui dokumen pendukung/report trial/visual | 5: Semua akar penyebab dapat dibuktikan
+10. Ketepatan Root Cause — 0: Masalah yang disasar belum merupakan root cause (masih bisa dipertanyakan "kenapa" lagi) | 1: Sebagian masalah yang disasar sudah merupakan root cause final | 2: Semua masalah yang disasar sudah merupakan root cause final (tidak bisa dipertanyakan "kenapa" lagi)
+
+TAHAP PLAN — 4. Tetapkan Perbaikan
+11. Action Plan & PIC — 0: Tidak ada action plan dan PIC | 1: Sebagian action plan dan PIC ada | 2: Semua action plan dan PIC ada
+12. Rencana Perbaikan per sumber masalah — 0: Tidak ada rencana perbaikan | 1: Sebagian masalah ada rencana perbaikan | 2: Semua sumber masalah punya rencana perbaikan yang jelas dan/atau prioritas penyelesaian yang baik
+13. Form Usulan Perbaikan (FUP) — 0: Tidak ada pendaftaran FUP | 3: Sudah didaftarkan FUP namun belum dapat approval | 5: Sudah didaftarkan FUP dan sudah dapat approval (dapat dibuktikan), ATAU action plan memang tidak memerlukan FUP
+
+TAHAP DO — 5. Implementasi Perbaikan
+14. Pelaksanaan Action Plan — 0: Tidak terlaksana semua | 1: Sebagian terlaksana | 2: Terlaksana semua
+15. Dokumentasi Pelaksanaan — 0: Tidak ada bentuk dokumentasi kegiatan | 5: Sebagian kegiatan pelaksanaan sudah terdokumentasi (dokumen/report trial/visual) | 8: Semua kegiatan pelaksanaan sudah terdokumentasi
+
+TAHAP CHECK — 6. Cek & Monitor Hasil
+16. Pencapaian Target — 0: Tidak dapat menghubungkan antara hasil dengan target | 1: Dapat menghubungkan antara hasil dengan target
+   WAJIB BANDINGKAN ANGKA SECARA EKSPLISIT: ambil angka TARGET yang disebutkan di kriteria 5 (Target SMART) pada awal dokumen, lalu bandingkan dengan angka HASIL AKHIR/pencapaian yang dilaporkan di bagian akhir dokumen. Skor 1 hanya diberikan jika ada keterhubungan yang jelas dan konsisten antara target awal dan hasil akhir — kalau target bergeser/berbeda dari rencana awal tanpa penjelasan yang jelas, itu HARUS disebutkan dan skor diturunkan.
+17. Pengecekan Hasil — 0: Tidak dilakukan pengecekan hasil | 3: Dilakukan pengecekan hasil namun belum valid/tidak ada bukti | 5: Pengecekan hasil dilakukan dan valid, dibuktikan dengan evidence
+
+TAHAP ACT — 9. Standardisasi
+18. Kelengkapan Standardisasi (IK/SOP/OPL/Task CILT & PM/Centerline) — 0: Belum semua terstandarkan | 3: Sebagian sudah terstandarkan | 5: Sudah semua terstandarkan
+19. Validasi Standardisasi — 0: Standar terbaru belum tervalidasi/disahkan oleh Sec Head Area | 1: Sebagian standar terbaru sudah terverifikasi & tervalidasi, dibuktikan dengan no register dokumen dan approval Sec Head Area | 2: Semua standar terbaru sudah terverifikasi & tervalidasi, dibuktikan dengan no register dokumen dan approval Sec Head Area
+20. Tindak Lanjut Sosialisasi — 0: Belum sosialisasi | 3: Sebagian dibuktikan dengan dokumen sosialisasi (absensi) | 5: Dibuktikan lengkap dengan dokumen sosialisasi (absensi)
+21. Replikasi ke area/mesin lain — 0: Area/mesin belum direplikasi | 3: Sebagian area/mesin sudah direplikasi ke area yang aplikatif | 5: Semua area/mesin sudah direplikasi ke area yang aplikatif, ATAU improvement memang tidak bisa direplikasi
+"""
+
+# 14 kategori impact PERSIS dari dokumen manual "Bagian I — Form Penilaian".
+KATEGORI_IMPACT_14 = [
+    "Gas / Steam",
+    "Material Balance",
+    "Manpower",
+    "Downtime",
+    "Waktu / Proses Kerja",
+    "Overtime",
+    "Listrik",
+    "Air",
+    "Stock Accuracy",
+    "Inventory / Material Value",
+    "DOI",
+    "Quality",
+    "Safety & Environment",
+    "SOC & HTA",
+]
 
 
 # ==========================================
@@ -248,14 +314,33 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         prompt_1 = (
             "Kamu adalah auditor dokumen Kaizen yang teliti dan hanya"
             " melaporkan fakta yang benar-benar tertulis/tervisualisasi di"
-            " dokumen, tanpa asumsi atau tambahan opini.\n\n"
-            "Ekstrak dari PDF secara sistematis dan lengkap:\n"
-            "1. Masalah Utama (kondisi awal, data pendukung)\n"
-            "2. Solusi/Perbaikan yang dilakukan\n"
-            "3. Bukti Visual yang tersedia (foto before/after, diagram,"
-            " grafik — sebutkan ada/tidaknya masing-masing)\n"
-            "4. Hasil Angka Nyata (Saving) — sebutkan satuan dan"
-            " periode pengukuran bila ada\n\n"
+            " dokumen, tanpa asumsi atau tambahan opini. Ekstrak SETIAP"
+            " elemen berikut secara VERBATIM/detail (kutip isi aslinya,"
+            " jangan diringkas berlebihan), karena akan dipakai untuk"
+            " analisis koherensi logika, bukan sekadar cek ada/tidak:\n\n"
+            "1. MASALAH UTAMA: kondisi awal, data pendukung, 5W1H lengkap"
+            " (What/Where/When/Who/Why/How), evidence 5G.\n"
+            "2. TARGET AWAL (SMART): kutip persis angka/kalimat target yang"
+            " ditetapkan di awal dokumen.\n"
+            "3. FISHBONE DIAGRAM: untuk SETIAP cabang/duri yang ada, sebutkan"
+            " (a) kategori 4M yang dipakai dokumen (Man/Method/"
+            "Machine/Material), (b) isi penyebab yang dituliskan di cabang"
+            " itu. Buat sebagai daftar, contoh: 'Man: operator kurang"
+            " terlatih', 'Machine: mesin sering aus'.\n"
+            "4. ANALISIS 5 WHYS: kutip SETIAP baris why secara berurutan"
+            " dan lengkap (why 1 sampai why terakhir) apa adanya, jangan"
+            " diringkas. Sebutkan juga apa root cause final yang diklaim"
+            " dokumen.\n"
+            "5. ACTION PLAN & PIC: daftar rencana perbaikan beserta"
+            " penanggung jawab (PIC) dan status FUP (Form Usulan"
+            " Perbaikan) bila disebutkan.\n"
+            "6. IMPLEMENTASI: bukti pelaksanaan (dokumentasi, foto"
+            " before/after, laporan trial).\n"
+            "7. HASIL AKHIR/PENCAPAIAN: kutip persis angka hasil akhir yang"
+            " dilaporkan (termasuk saving), dan periode pengukurannya.\n"
+            "8. STANDARDISASI: dokumen IK/SOP/OPL/CILT/PM/Centerline yang"
+            " dibuat, status validasi/approval, bukti sosialisasi"
+            " (absensi), dan bukti replikasi ke area/mesin lain.\n\n"
             "Jika suatu elemen tidak ditemukan di dokumen, nyatakan dengan"
             " jelas 'TIDAK DITEMUKAN' — jangan mengarang."
         )
@@ -265,13 +350,27 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
 
         # --- 2. Jaksa (Kritik) ---
         prompt_2 = (
-            "Kamu berperan sebagai Jaksa yang skeptis dalam audit Kaizen."
-            " Tugasmu HANYA mencari kelemahan berbasis fakta yang ada,"
-            " bukan mengarang tuduhan.\n\n"
+            "Kamu berperan sebagai Jaksa yang skeptis dan sangat teliti"
+            " dalam audit Kaizen. Tugasmu mencari kelemahan KOHERENSI dan"
+            " LOGIKA, bukan cuma kelengkapan administratif, berdasarkan"
+            " fakta yang ada (jangan mengarang tuduhan).\n\n"
             f"Fakta Kasus:\n{laporan_agen_1}\n\n"
-            "Identifikasi: kelemahan bukti, celah logika antara masalah dan"
-            " solusi, kurangnya data pendukung, atau potensi manipulasi"
-            " angka saving. Sertakan alasan yang merujuk ke fakta di atas."
+            "Periksa dan pertanyakan secara spesifik:\n"
+            "- 5 WHYS: apakah tiap 'why' benar-benar jawaban logis dari"
+            " 'why' sebelumnya, atau ada loncatan logika/tidak nyambung?"
+            " Apakah root cause akhirnya konsisten dengan salah satu"
+            " cabang di fishbone, atau malah menyebut hal baru yang tidak"
+            " muncul di fishbone?\n"
+            "- FISHBONE/4M: apakah ada penyebab yang salah kategori (misal"
+            " soal mesin dimasukkan ke kategori Man)? Apakah ada faktor 4M"
+            " yang jelas relevan tapi tidak dibahas sama sekali?\n"
+            "- TARGET VS HASIL: apakah angka hasil akhir benar-benar"
+            " menjawab target awal, atau targetnya bergeser tanpa"
+            " penjelasan?\n"
+            "- Kelemahan bukti, celah antara masalah dan solusi, kurangnya"
+            " data pendukung, atau potensi manipulasi angka saving.\n\n"
+            "Sertakan alasan yang merujuk ke fakta di atas untuk tiap"
+            " temuan."
         )
         dakwaan_jaksa = panggil_ai_dengan_retry(
             prompt_2, "Jaksa Penilai [2/5]", status_box
@@ -291,23 +390,29 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         )
 
         # --- 4. Hakim Agung (Skoring 21 Poin) ---
-        prompt_4 = f"""Kamu adalah Hakim Agung penilaian Kaizen yang wajib bersikap objektif, konsisten, dan hanya menilai berdasarkan bukti tertulis — bukan asumsi.
+        prompt_4 = f"""Kamu adalah Hakim Agung penilaian Kaizen yang wajib bersikap objektif, konsisten, dan KRITIS TERHADAP ISI — bukan cuma mengecek "ada/tidak ada elemen", tapi memverifikasi apakah isinya benar secara logika, tepat kategorinya, dan nyambung alur PDCA-nya.
 
 ATURAN PENILAIAN:
-- Beri skor SESUAI pilihan yang tersedia per kriteria (jangan beri skor di luar pilihan).
-- Jika bukti tidak ditemukan/lemah, beri skor terendah pada kriteria tsb.
-- Justifikasi WAJIB merujuk fakta konkret dari dokumen, bukan opini umum.
-- Bersikap ketat: skor tinggi hanya untuk bukti yang benar-benar kuat dan lengkap.
+- Beri skor SESUAI pilihan yang tersedia per kriteria (jangan beri skor di luar pilihan yang tercantum di rubrik).
+- Ikuti PERSIS deskripsi tiap tingkat skor di rubrik di bawah — jangan menebak sendiri artinya.
+- Untuk kriteria yang punya instruksi "WAJIB PERIKSA..." di rubrik, benar-benar lakukan analisis mendalam itu (misal: telusuri logika tiap baris 5 Whys, cek kesesuaian kategori 4M per cabang fishbone, bandingkan angka target vs hasil akhir) — jangan cuma cek keberadaan elemen.
+- Justifikasi WAJIB spesifik dan merujuk isi konkret dari dokumen (kutip singkat bagian relevan bila perlu), bukan opini umum seperti "sudah lengkap" atau "ada bukti".
+- Bersikap ketat: skor tinggi hanya untuk bukti yang benar-benar kuat, lengkap, DAN koheren secara logika.
 
-Fakta: {laporan_agen_1}
-Kritik Jaksa: {dakwaan_jaksa}
-Pembelaan: {pembelaan_pengacara}
+RUBRIK LENGKAP (deskripsi tiap tingkat skor):
+{RUBRIK_21_POIN_DETAIL}
 
-Evaluasi 21 kriteria berikut (nilai dalam kurung adalah pilihan skor yang SAH):
-1. 5G [0,1,2] | 2. Losses Measurement [0,1,2] | 3. 5W1H [0,1,2] | 4. Visualisasi [0,1,2] | 5. Target SMART [0,2] | 6. Fishbone 4M [0,1,2] | 7. Pemetaan 4M [0,1,2] | 8. Hubungan Akar Penyebab [0,1,2] | 9. Bukti Akar Penyebab [0,3,5] | 10. Ketepatan Root Cause [0,1,2] | 11. Action Plan PIC [0,1,2] | 12. Rencana Perbaikan [0,1,2] | 13. Form Usulan Perbaikan [0,3,5] | 14. Pelaksanaan Action Plan [0,1,2] | 15. Dokumentasi Pelaksanaan [0,5,8] | 16. Pencapaian Target [0,1] | 17. Pengecekan Hasil [0,3,5] | 18. Kelengkapan Standardisasi [0,3,5] | 19. Validasi Standardisasi [0,1,2] | 20. Tindak Lanjut Sosialisasi [0,3,5] | 21. Replikasi [0,3,5]
+FAKTA HASIL EKSTRAKSI DOKUMEN:
+{laporan_agen_1}
 
-Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis:
-[{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan singkat merujuk fakta"}}]"""
+KRITIK JAKSA (pertimbangkan temuan ini dalam penilaian):
+{dakwaan_jaksa}
+
+PEMBELAAN:
+{pembelaan_pengacara}
+
+Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifikasi harus spesifik dan merujuk isi dokumen, minimal 1-2 kalimat menjelaskan MENGAPA skor itu diberikan berdasarkan analisis koherensi, bukan cuma "ada evidence"):
+[{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik merujuk isi dokumen dan analisis koherensi"}}]"""
         raw_hakim = panggil_ai_dengan_retry(
             prompt_4,
             "Hakim Agung [4/5]",
@@ -317,22 +422,33 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis:
         hasil_hakim_json = bersihkan_dan_parse_json(raw_hakim)
 
         # --- 5. Analis Impact ---
+        daftar_kategori_str = ", ".join(KATEGORI_IMPACT_14)
         prompt_5 = (
             "Kamu adalah Analis Impact yang menilai dampak operasional dari"
             " dokumen Kaizen ini secara objektif berdasarkan bukti"
             " tertulis saja.\n\n"
-            "Evaluasi 8 kategori impact: Gas/Steam, Material Balance,"
-            " Manpower, Downtime, Waktu Kerja, Overtime, Listrik, Air.\n"
-            "Untuk setiap kategori, status HARUS salah satu dari:"
-            " 'YA' (ada dampak terbukti), 'TIDAK' (tidak ada/tidak"
-            " disebutkan), atau 'TIDAK RELEVAN'.\n\n"
+            f"Evaluasi {len(KATEGORI_IMPACT_14)} kategori impact berikut:"
+            f" {daftar_kategori_str}.\n"
+            "Untuk setiap kategori, status HARUS salah satu dari: 'IYA'"
+            " (ada dampak terbukti dengan data/keterangan jelas di"
+            " dokumen), 'TIDAK' (tidak ada dampak/tidak disebutkan sama"
+            " sekali), atau 'TIDAK YAKIN' (disinggung tapi tidak jelas/"
+            " tidak ada data pendukung yang cukup).\n\n"
+            "SELAIN itu, tentukan juga jenis saving berdasarkan dokumen:"
+            " apakah termasuk 'Hard Saving' (saving real >100 juta rupiah,"
+            " terkait penurunan pemakaian gas/listrik/air/uji riksa/"
+            " pembelian material), 'Virtual Saving atau Cost Avoidance'"
+            " (saving tidak real, terkait material balance/stock akurasi/"
+            "customer complain), 'Keduanya', atau 'Tidak Ada' — tambahkan"
+            " sebagai satu entri terpisah dengan kategori bernilai"
+            " 'Jenis Saving'.\n\n"
             "Keluarkan HANYA JSON array valid dengan skema persis:\n"
             '[{"kategori": "Air", "status": "TIDAK", "keterangan":'
             ' "alasan singkat merujuk dokumen"}]'
         )
         raw_analis = panggil_ai_dengan_retry(
             [gemini_file, prompt_5],
-            "Analis Kesan [5/5]",
+            "Analis Dampak [5/5]",
             status_box,
             config=GENERATION_CONFIG_JSON,
         )
@@ -423,14 +539,14 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis:
           )
 
         st.session_state.transkrip = [
-            {"Peranan": "Ejen Pengekstrak", "Laporan": laporan_agen_1},
-            {"Peranan": "Ejen Jaksa Penilai", "Laporan": dakwaan_jaksa},
+            {"Peran": "Agen Pengekstrak", "Laporan": laporan_agen_1},
+            {"Peran": "Agen Jaksa Penilai", "Laporan": dakwaan_jaksa},
             {
-                "Peranan": "Ejen Pengacara Pembela",
+                "Peran": "Agen Pengacara Pembela",
                 "Laporan": pembelaan_pengacara,
             },
-            {"Peranan": "Ejen Hakim Agung", "Laporan": raw_hakim},
-            {"Peranan": "Ejen Analis Kesan", "Laporan": raw_analis},
+            {"Peran": "Agen Hakim Agung", "Laporan": raw_hakim},
+            {"Peran": "Agen Analis Dampak", "Laporan": raw_analis},
         ]
 
         st.session_state.proses_selesai = True
@@ -438,7 +554,7 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis:
 
       except Exception as e:
         status_box.update(label="❌ Terjadi Kesalahan", state="error")
-        st.error(f"**Pesan Ralat:** `{e}`")
+        st.error(f"**Pesan Error:** `{e}`")
         with st.expander("🔍 Detail teknis (traceback lengkap)"):
           st.code(traceback.format_exc())
       finally:
@@ -465,7 +581,7 @@ if st.session_state.proses_selesai:
   # Peringatan permanen jika ada agen yang gagal menghasilkan jawaban,
   # supaya tidak perlu bongkar transkrip / log status untuk tahu masalahnya.
   agen_kosong = [
-      entri["Peranan"]
+      entri["Peran"]
       for entri in st.session_state.transkrip
       if not str(entri.get("Laporan", "")).strip()
   ]
@@ -506,7 +622,7 @@ if st.session_state.proses_selesai:
   col_a.metric("Total Skor AI (awal)", f"{total_ai:.0f}")
   col_b.metric("Total Skor Final (setelah validasi)", f"{total_final:.0f}")
 
-  st.subheader("💰 2. Tabel Validasi Saving (8 Kategori)")
+  st.subheader("💰 2. Tabel Validasi Impact & Saving (14 Kategori)")
   edited_saving = st.data_editor(
       st.session_state.df_saving,
       num_rows="dynamic",
@@ -516,7 +632,7 @@ if st.session_state.proses_selesai:
 
   with st.expander("📜 Lihat Transkrip Lengkap Multi-Agent"):
     for entri in st.session_state.transkrip:
-      st.markdown(f"**{entri['Peranan']}**")
+      st.markdown(f"**{entri['Peran']}**")
       st.text(entri["Laporan"])
       st.divider()
 
