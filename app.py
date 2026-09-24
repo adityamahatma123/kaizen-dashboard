@@ -1054,7 +1054,7 @@ if st.session_state.proses_selesai:
   elif verdict_gate == "LAYAK":
     st.success(f"✅ **GATE CHECK: LAYAK sebagai proyek improvement.** {alasan_gate}")
 
-  st.subheader("🔍 -1. Verifikasi Kelayakan, Kebenaran 5W1H & Bukti Foto")
+  st.subheader("🔍 1. Verifikasi Kelayakan, Kebenaran 5W1H & Bukti Foto")
   st.caption(
       "Hasil dari modul yang membaca LANGSUNG file PDF (termasuk foto/"
       "gambar di dalamnya) — bukan cuma ringkasan teks. Kolom **status**"
@@ -1069,7 +1069,7 @@ if st.session_state.proses_selesai:
       key="tabel_verifikasi",
   )
 
-  st.subheader("🔗 0. Audit Konsistensi Metodologi PDCA (Golden Thread)")
+  st.subheader("🔗 2. Audit Konsistensi Metodologi PDCA (Golden Thread)")
   st.caption(
       "Menelusuri apakah tiap tahap (5W1H → Problem Statement → Kepala"
       " Ikan → Kategori 4M → Rantai Why-Why → Root Cause → Action Plan →"
@@ -1085,7 +1085,7 @@ if st.session_state.proses_selesai:
       key="tabel_alur_logika",
   )
 
-  st.subheader("📝 1. Tabel Validasi Rubrik (21 Poin)")
+  st.subheader("📝 3. Tabel Validasi Rubrik (21 Poin)")
   st.caption(
       "Kolom **status validasi** kini ditentukan secara DINAMIS oleh AI"
       " berdasarkan tingkat keyakinannya terhadap bukti pada dokumen ini"
@@ -1120,7 +1120,7 @@ if st.session_state.proses_selesai:
   )
   col_b.metric("Total Skor Saat Ini (Setelah Validasi)", f"{total_saat_ini:.0f}")
 
-  st.subheader("💰 2. Tabel Validasi Impact & Saving (14 Kategori)")
+  st.subheader("💰 4. Tabel Validasi Impact & Saving (14 Kategori)")
   edited_saving = st.data_editor(
       st.session_state.df_saving,
       num_rows="dynamic",
@@ -1128,7 +1128,7 @@ if st.session_state.proses_selesai:
       key="tabel_saving",
   )
 
-  st.subheader("💬 3. Feedback & Saran untuk Peserta")
+  st.subheader("💬 5. Feedback & Saran untuk Peserta")
   st.caption(
       "Bahasa di tabel ini sengaja dibuat untuk PESERTA (bukan juri) —"
       " membangun dan actionable. Ini yang bisa langsung kamu teruskan"
