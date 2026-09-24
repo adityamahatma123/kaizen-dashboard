@@ -21,14 +21,45 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    /* Sembunyikan menu bawaan agar lebih rapi */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
+    
+    /* Spacing container utama */
     .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    h1 { color: #B03A2E; text-align: center; font-family: 'Segoe UI', sans-serif; font-weight: 700; }
-    .stButton>button { background-color: #E07A5F; color: white; border-radius: 6px; border: none; padding: 0.5rem 1rem; font-weight: 600; }
-    .stButton>button:hover { background-color: #C85A3F; color: white; }
-    .manual-badge { background-color: #FCE8E6; color: #B03A2E; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+    
+    /* Judul H1 dengan warna Slate Blue yang profesional namun lembut */
+    h1 { color: #5C7C99; text-align: center; font-family: 'Nunito', 'Segoe UI', sans-serif; font-weight: 700; margin-bottom: 0.5rem;}
+    
+    /* Gaya Tombol Modern & Pastel (Ada efek melayang saat di-hover) */
+    .stButton>button { 
+        background-color: #A3B9D2; 
+        color: white; 
+        border-radius: 8px; 
+        border: none; 
+        padding: 0.6rem 1.2rem; 
+        font-weight: 600; 
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+    .stButton>button:hover { 
+        background-color: #8BA3C7; 
+        color: white; 
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+    }
+    
+    /* Badge manual validasi (Warna pastel pink-merah yang tidak mencolok) */
+    .manual-badge { 
+        background-color: #FDF1F0; 
+        color: #D46B6B; 
+        padding: 4px 10px; 
+        border-radius: 12px; 
+        font-size: 0.8rem; 
+        font-weight: 600; 
+        border: 1px solid #F9DEDC;
+    }
     </style>
 """,
     unsafe_allow_html=True,
@@ -36,12 +67,18 @@ st.markdown(
 
 st.title("🏢 Portal Validasi Kaizen")
 st.markdown(
-    "<p style='text-align: center; color: #555; font-size: 1.1rem;'>Unggah"
+    "<p style='text-align: center; color: #7F8C8D; font-size: 1.1rem; font-weight: 400; margin-bottom: 2rem;'>Unggah"
     " dokumen evaluasi, biarkan AI bekerja secara objektif dan konsisten,"
     " lalu lakukan validasi akhir secara manual pada poin-poin kritikal.</p>",
     unsafe_allow_html=True,
 )
 st.divider()
+
+# ==========================================
+# LANJUTKAN DENGAN KODE ASLI ANDA DI BAWAH INI
+# (Mulai dari: # Inisialisasi API Key dari Secrets)
+# Jangan ada yang dirubah sama sekali di bawah ini.
+# ==========================================
 
 # Inisialisasi API Key dari Secrets
 try:
