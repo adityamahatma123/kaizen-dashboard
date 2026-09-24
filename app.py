@@ -74,37 +74,16 @@ st.markdown(
 )
 st.divider()
 
-# ==========================================
-# LANJUTKAN DENGAN KODE ASLI ANDA DI BAWAH INI
-# (Mulai dari: # Inisialisasi API Key dari Secrets)
-# Jangan ada yang dirubah sama sekali di bawah ini.
-# ==========================================
-
 # Inisialisasi API Key dari Secrets
 try:
-  API_KEY = st.secrets["GEMINI_API_KEY"].strip()
-  client = genai.Client(api_key=API_KEY)
+    API_KEY = st.secrets["GEMINI_API_KEY"].strip()
+    client = genai.Client(api_key=API_KEY)
 except Exception as e:
-  st.error(f"Gagal memuat API Key dari Secrets. Detail: {e}")
-  st.stop()
+    st.error(f"Gagal memuat API Key dari Secrets. Detail: {e}")
+    st.stop()
 
-# Model yang digunakan. "Lite" dipilih karena free tier-nya jauh lebih
-# longgar (15 request/menit) dibanding gemini-3.5-flash biasa (cuma 5
-# request/menit) — penting karena alur ini melakukan 5 panggilan berurutan
-# per dokumen. Kalau nanti sudah mengaktifkan billing dan ingin kualitas
-# penalaran lebih dalam, ganti kembali ke "gemini-3.5-flash".
 MODEL_ID = "gemini-3.5-flash-lite"
 
-# Parameter untuk memaksimalkan KONSISTENSI hasil antar-run.
-# CATATAN PENTING: temperature=0 + top_k=1 TIDAK direkomendasikan untuk
-# model Gemini 3.x (termasuk gemini-3.5-flash) karena model ini punya mode
-# "thinking" internal — kombinasi itu bisa membuat model terjebak di proses
-# berpikir tanpa pernah mengeluarkan jawaban akhir (response.text jadi
-# kosong). Gunakan thinking_level + seed sebagai gantinya.
-# thinking_level="medium" dipakai (bukan "low") karena penilaian sekarang
-# butuh penalaran mendalam: memverifikasi rantai logika 5 Whys, ketepatan
-# kategori 4M pada fishbone, dan konsistensi target-vs-hasil — bukan cuma
-# mengecek ada/tidaknya elemen.
 GENERATION_CONFIG_TEXT = types.GenerateContentConfig(
     seed=42,
     thinking_config=types.ThinkingConfig(thinking_level="medium"),
@@ -116,18 +95,6 @@ GENERATION_CONFIG_JSON = types.GenerateContentConfig(
     response_mime_type="application/json",
 )
 
-# Referensi kriteria yang SECARA STRUKTURAL sering membutuhkan verifikasi
-# lapangan (konteks aktual yang tidak bisa dipastikan AI hanya dari
-# dokumen/foto). Dict ini punya 2 peran:
-#   1) Disisipkan ke prompt Sintesis Skoring Rubrik sebagai BAHAN
-#      PERTIMBANGAN (bukan aturan baku) supaya keputusan "perlu validasi
-#      manual" tetap dinamis dan spesifik terhadap isi dokumen yang
-#      sedang dinilai — bukan daftar tetap yang dipaksakan sama untuk
-#      semua submission, apapun isinya.
-#   2) Dipakai sebagai FALLBACK oleh tentukan_validasi_manual() kalau AI
-#      gagal menyertakan field "perlu_validasi_manual" pada hasil JSON-nya
-#      (mis. karena parsing gagal), supaya aplikasi tetap punya jaring
-#      pengaman dan tidak diam-diam menandai semua kriteria "OTOMATIS AI".
 KRITERIA_RUJUKAN_VALIDASI_MANUAL = {
     7: "Pemetaan 4M — verifikasi kesesuaian dengan kondisi mesin/area aktual di lapangan",
     10: "Ketepatan Root Cause — memerlukan justifikasi teknis dari asesor lapangan",
@@ -142,10 +109,6 @@ _DAFTAR_RUJUKAN_VALIDASI_STR = "\n".join(
     for no, alasan in KRITERIA_RUJUKAN_VALIDASI_MANUAL.items()
 )
 
-# Rubrik 21 poin PERSIS dari dokumen manual "Rubrik Penilaian Kaizen 2026 —
-# Bagian II". Deskripsi tiap tingkat skor disertakan lengkap (bukan cuma
-# nama kriteria) supaya AI menilai berdasarkan definisi asli, bukan
-# tebakan generik "ada/tidak ada".
 RUBRIK_21_POIN_DETAIL = """
 TAHAP PLAN — 1. Definisikan Masalah & Tentukan Target
 1. 5G — 0: Tidak ada evidence | 1: Ada evidence tapi tidak relevan dengan masalah | 2: Ada evidence dan relevan dengan masalah
@@ -186,7 +149,6 @@ TAHAP ACT — 9. Standardisasi
 21. Replikasi ke area/mesin lain — 0: Area/mesin belum direplikasi | 3: Sebagian area/mesin sudah direplikasi ke area yang aplikatif | 5: Semua area/mesin sudah direplikasi ke area yang aplikatif, ATAU improvement memang tidak bisa direplikasi
 """
 
-# 14 kategori impact PERSIS dari dokumen manual "Bagian I — Form Penilaian".
 KATEGORI_IMPACT_14 = [
     "Gas / Steam",
     "Material Balance",
@@ -204,29 +166,27 @@ KATEGORI_IMPACT_14 = [
     "SOC & HTA",
 ]
 
-
 # ==========================================
 # 2. INISIALISASI MEMORI SESI (SESSION STATE)
 # ==========================================
 if "proses_selesai" not in st.session_state:
-  st.session_state.proses_selesai = False
+    st.session_state.proses_selesai = False
 if "df_rubrik" not in st.session_state:
-  st.session_state.df_rubrik = pd.DataFrame()
+    st.session_state.df_rubrik = pd.DataFrame()
 if "df_alur_logika" not in st.session_state:
-  st.session_state.df_alur_logika = pd.DataFrame()
+    st.session_state.df_alur_logika = pd.DataFrame()
 if "df_verifikasi" not in st.session_state:
-  st.session_state.df_verifikasi = pd.DataFrame()
+    st.session_state.df_verifikasi = pd.DataFrame()
 if "df_feedback" not in st.session_state:
-  st.session_state.df_feedback = pd.DataFrame()
+    st.session_state.df_feedback = pd.DataFrame()
 if "df_saving" not in st.session_state:
-  st.session_state.df_saving = pd.DataFrame()
+    st.session_state.df_saving = pd.DataFrame()
 if "transkrip" not in st.session_state:
-  st.session_state.transkrip = []
+    st.session_state.transkrip = []
 if "nama_file" not in st.session_state:
-  st.session_state.nama_file = "Dokumen_Kaizen"
+    st.session_state.nama_file = "Dokumen_Kaizen"
 if "total_skor_ai_awal" not in st.session_state:
-  st.session_state.total_skor_ai_awal = 0.0
-
+    st.session_state.total_skor_ai_awal = 0.0
 
 # ==========================================
 # 3. FUNGSI MESIN AI & PARSER (ANTI-ERROR)
@@ -238,126 +198,108 @@ def panggil_ai_dengan_retry(
     config=None,
     maksimal_percobaan=3,
 ):
-  """Eksekusi panggilan API dengan jeda anti-limit dan log langsung ke UI."""
-  config = config or GENERATION_CONFIG_TEXT
-  for percobaan in range(maksimal_percobaan):
-    try:
-      log_ui.write(f"⏳ **{deskripsi_agen}:** Sedang menganalisis...")
-      response = client.models.generate_content(
-          model=MODEL_ID, contents=contents, config=config
-      )
-      teks_hasil = response.text if response and response.text else ""
-      if not teks_hasil:
-        finish_reason = None
+    config = config or GENERATION_CONFIG_TEXT
+    for percobaan in range(maksimal_percobaan):
         try:
-          finish_reason = response.candidates[0].finish_reason
-        except Exception:
-          pass
-        log_ui.write(
-            f"❗ **{deskripsi_agen}:** Jawaban KOSONG dari model"
-            f" (finish_reason: {finish_reason}). Mencoba ulang..."
-        )
-        if percobaan == maksimal_percobaan - 1:
-          log_ui.write(
-              f"❌ **{deskripsi_agen}:** Tetap kosong setelah"
-              f" {maksimal_percobaan}x percobaan."
-          )
-          return ""
-        time.sleep(8)
-        continue
-      log_ui.write(
-          f"✅ **{deskripsi_agen}:** Selesai! Pendinginan 15 detik"
-          " (menjaga di bawah limit 5 request/menit free tier)..."
-      )
-      time.sleep(15)
-      return teks_hasil
-    except Exception as e:
-      pesan_error_asli = str(e)
-      pesan_error_upper = pesan_error_asli.upper()
-      if any(
-          k in pesan_error_upper
-          for k in ["503", "429", "RESOURCE_EXHAUSTED", "UNAVAILABLE"]
-      ):
-        log_ui.write(
-            f"⚠️ **{deskripsi_agen}:** Kena limit rate (kemungkinan 5"
-            f" request/menit free tier terlampaui). Detail:"
-            f" `{pesan_error_asli[:300]}`. Menunggu 65 detik agar masuk"
-            " jendela menit berikutnya..."
-        )
-        time.sleep(65)
-      else:
-        if percobaan == maksimal_percobaan - 1:
-          raise
-        log_ui.write(
-            f"⚠️ **{deskripsi_agen}:** Error: `{pesan_error_asli[:300]}`."
-            f" Mencoba ulang ({percobaan + 2}/{maksimal_percobaan})..."
-        )
-        time.sleep(10)
-  log_ui.write(
-      f"❌ **{deskripsi_agen}:** Menyerah setelah {maksimal_percobaan}x"
-      " percobaan (kemungkinan kuota/rate limit API habis — cek Google AI"
-      " Studio / billing akun Gemini-mu)."
-  )
-  return ""
-
+            log_ui.write(f"⏳ **{deskripsi_agen}:** Sedang menganalisis...")
+            response = client.models.generate_content(
+                model=MODEL_ID, contents=contents, config=config
+            )
+            teks_hasil = response.text if response and response.text else ""
+            if not teks_hasil:
+                finish_reason = None
+                try:
+                    finish_reason = response.candidates[0].finish_reason
+                except Exception:
+                    pass
+                log_ui.write(
+                    f"❗ **{deskripsi_agen}:** Jawaban KOSONG dari model"
+                    f" (finish_reason: {finish_reason}). Mencoba ulang..."
+                )
+                if percobaan == maksimal_percobaan - 1:
+                    log_ui.write(
+                        f"❌ **{deskripsi_agen}:** Tetap kosong setelah"
+                        f" {maksimal_percobaan}x percobaan."
+                    )
+                    return ""
+                time.sleep(8)
+                continue
+            log_ui.write(
+                f"✅ **{deskripsi_agen}:** Selesai! Pendinginan 15 detik"
+                " (menjaga di bawah limit 5 request/menit free tier)..."
+            )
+            time.sleep(15)
+            return teks_hasil
+        except Exception as e:
+            pesan_error_asli = str(e)
+            pesan_error_upper = pesan_error_asli.upper()
+            if any(
+                k in pesan_error_upper
+                for k in ["503", "429", "RESOURCE_EXHAUSTED", "UNAVAILABLE"]
+            ):
+                log_ui.write(
+                    f"⚠️ **{deskripsi_agen}:** Kena limit rate (kemungkinan 5"
+                    f" request/menit free tier terlampaui). Detail:"
+                    f" `{pesan_error_asli[:300]}`. Menunggu 65 detik agar masuk"
+                    " jendela menit berikutnya..."
+                )
+                time.sleep(65)
+            else:
+                if percobaan == maksimal_percobaan - 1:
+                    raise
+                log_ui.write(
+                    f"⚠️ **{deskripsi_agen}:** Error: `{pesan_error_asli[:300]}`."
+                    f" Mencoba ulang ({percobaan + 2}/{maksimal_percobaan})..."
+                )
+                time.sleep(10)
+    log_ui.write(
+        f"❌ **{deskripsi_agen}:** Menyerah setelah {maksimal_percobaan}x"
+        " percobaan (kemungkinan kuota/rate limit API habis — cek Google AI"
+        " Studio / billing akun Gemini-mu)."
+    )
+    return ""
 
 def bersihkan_dan_parse_json(teks_raw):
-  """Fungsi pembaca JSON yang agresif mencari pola array tabel."""
-  if not teks_raw:
+    if not teks_raw:
+        return []
+
+    teks_bersih = re.sub(r"```json", "", teks_raw, flags=re.IGNORECASE)
+    teks_bersih = re.sub(r"```", "", teks_bersih).strip()
+
+    try:
+        data = json.loads(teks_bersih)
+        if isinstance(data, dict):
+            for _key, value in data.items():
+                if isinstance(value, list):
+                    return value
+            return [data]
+        return data if isinstance(data, list) else []
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\[\s*\{.*?\}\s*\]", teks_raw, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            pass
+
     return []
 
-  teks_bersih = re.sub(r"```json", "", teks_raw, flags=re.IGNORECASE)
-  teks_bersih = re.sub(r"```", "", teks_bersih).strip()
-
-  try:
-    data = json.loads(teks_bersih)
-    if isinstance(data, dict):
-      for _key, value in data.items():
-        if isinstance(value, list):
-          return value
-      return [data]
-    return data if isinstance(data, list) else []
-  except json.JSONDecodeError:
-    pass
-
-  match = re.search(r"\[\s*\{.*?\}\s*\]", teks_raw, re.DOTALL)
-  if match:
-    try:
-      return json.loads(match.group(0))
-    except Exception:
-      pass
-
-  return []
-
-
 def tentukan_validasi_manual(item, nomor_kriteria):
-  """Menentukan status validasi manual untuk satu baris kriteria rubrik.
+    nilai_mentah = item.get("perlu_validasi_manual")
+    if nilai_mentah is None:
+        perlu = nomor_kriteria in KRITERIA_RUJUKAN_VALIDASI_MANUAL
+        alasan = (
+            KRITERIA_RUJUKAN_VALIDASI_MANUAL.get(nomor_kriteria, "")
+            if perlu
+            else ""
+        )
+        return perlu, alasan
 
-  Prioritas utama: penilaian DINAMIS dari AI (field "perlu_validasi_manual"
-  pada hasil Sintesis Skoring Rubrik), yang secara spesifik menimbang
-  keyakinan AI terhadap bukti pada DOKUMEN INI — bukan daftar tetap yang
-  dipaksakan sama untuk semua submission apa pun isinya.
-
-  Fallback: kalau AI tidak menyertakan field tersebut (misal karena respons
-  gagal di-parse), gunakan KRITERIA_RUJUKAN_VALIDASI_MANUAL sebagai jaring
-  pengaman supaya poin-poin yang secara struktural sensitif tetap ditandai.
-
-  Return: tuple (perlu_validasi: bool, alasan: str)
-  """
-  nilai_mentah = item.get("perlu_validasi_manual")
-  if nilai_mentah is None:
-    perlu = nomor_kriteria in KRITERIA_RUJUKAN_VALIDASI_MANUAL
-    alasan = (
-        KRITERIA_RUJUKAN_VALIDASI_MANUAL.get(nomor_kriteria, "")
-        if perlu
-        else ""
-    )
+    perlu = str(nilai_mentah).strip().upper() in ("YA", "TRUE", "1", "YES")
+    alasan = str(item.get("alasan_validasi_manual", "")).strip() if perlu else ""
     return perlu, alasan
-
-  perlu = str(nilai_mentah).strip().upper() in ("YA", "TRUE", "1", "YES")
-  alasan = str(item.get("alasan_validasi_manual", "")).strip() if perlu else ""
-  return perlu, alasan
-
 
 # ==========================================
 # 4. ALUR UNGGAH & EKSEKUSI MULTI-AGENT
@@ -365,178 +307,173 @@ def tentukan_validasi_manual(item, nomor_kriteria):
 uploaded_file = st.file_uploader("Pilih file PDF Kaizen", type="pdf")
 
 if uploaded_file is not None and not st.session_state.proses_selesai:
-  if st.button("🚀 Mulai Penilaian AI"):
-    st.session_state.nama_file = uploaded_file.name
+    if st.button("🚀 Mulai Penilaian AI"):
+        st.session_state.nama_file = uploaded_file.name
 
-    with st.status(
-        "🤖 AI Multi-Agent sedang bekerja...", expanded=True
-    ) as status_box:
-      # Gunakan folder temp resmi sistem (lebih aman untuk cloud/multi-user)
-      suffix = os.path.splitext(uploaded_file.name)[1] or ".pdf"
-      temp_path = None
-      gemini_file = None
-      try:
-        status_box.write("📄 Membaca berkas PDF...")
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix=suffix
-        ) as tmp:
-          tmp.write(uploaded_file.getbuffer())
-          temp_path = tmp.name
+        with st.status(
+            "🤖 AI Multi-Agent sedang bekerja...", expanded=True
+        ) as status_box:
+            suffix = os.path.splitext(uploaded_file.name)[1] or ".pdf"
+            temp_path = None
+            gemini_file = None
+            try:
+                status_box.write("📄 Membaca berkas PDF...")
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=suffix
+                ) as tmp:
+                    tmp.write(uploaded_file.getbuffer())
+                    temp_path = tmp.name
 
-        status_box.write("☁️ Mengunggah berkas ke Google AI Server...")
-        gemini_file = client.files.upload(file=temp_path)
+                status_box.write("☁️ Mengunggah berkas ke Google AI Server...")
+                gemini_file = client.files.upload(file=temp_path)
 
-        while gemini_file.state.name in ["PROCESSING", "PENDING"]:
-          status_box.write(
-              f"⏳ Menunggu verifikasi file di Google AI"
-              f" ({gemini_file.state.name})..."
-          )
-          time.sleep(4)
-          gemini_file = client.files.get(name=gemini_file.name)
+                while gemini_file.state.name in ["PROCESSING", "PENDING"]:
+                    status_box.write(
+                        f"⏳ Menunggu verifikasi file di Google AI"
+                        f" ({gemini_file.state.name})..."
+                    )
+                    time.sleep(4)
+                    gemini_file = client.files.get(name=gemini_file.name)
 
-        if gemini_file.state.name != "ACTIVE":
-          raise RuntimeError(
-              f"Berkas gagal diproses. Status: {gemini_file.state.name}"
-          )
+                if gemini_file.state.name != "ACTIVE":
+                    raise RuntimeError(
+                        f"Berkas gagal diproses. Status: {gemini_file.state.name}"
+                    )
 
-        # --- 1. Ekstraksi Bukti Dokumen ---
-        prompt_1 = (
-            "Anda berperan sebagai Analis Ekstraksi Bukti Dokumen Kaizen"
-            " yang teliti dan hanya melaporkan fakta yang benar-benar"
-            " tertulis/tervisualisasi di dokumen, tanpa mengarang, karena"
-            " akan dipakai untuk analisis koherensi logika, bukan sekadar"
-            " cek ada/tidak.\n\n"
-            "ATURAN PENTING #1 — CARI MAKNA TERSURAT DAN TERSIRAT: banyak"
-            " dokumen TIDAK menuliskan masalah/target/goal/hasil-saving"
-            " dengan label eksplisit yang jelas (misal tidak ada section"
-            " 'Target:' secara langsung), tapi maknanya tersirat di"
-            " kalimat lain (misal disebutkan sekilas dalam narasi solusi"
-            " atau kesimpulan). Untuk SETIAP elemen di poin 1, 2, dan 7 di"
-            " bawah: kalau tidak ada label eksplisit, telusuri SELURUH"
-            " dokumen untuk kalimat yang secara implisit mengandung makna"
-            " elemen itu. Kutip kalimat aslinya, sebutkan halaman berapa,"
-            " DAN tandai dengan jelas apakah itu 'EKSPLISIT' (ada label"
-            " jelas) atau 'IMPLISIT/TERSIRAT' (disimpulkan dari kalimat"
-            " lain, sebutkan dari kalimat mana).\n\n"
-            "ATURAN PENTING #2 — JANGAN CUMA SEBUT HALAMAN: setiap kali"
-            " merujuk suatu halaman/bagian dokumen, WAJIB jelaskan APA ISI"
-            " KONKRETNYA dan APA ANGKA/MEASUREMENT-nya di situ. DILARANG"
-            " menulis rujukan kosong seperti 'ada di halaman 24 dan 31'"
-            " tanpa penjelasan — itu tidak berguna untuk penilaian yang"
-            " butuh angka pengukuran jelas sebagai faktor penentu.\n\n"
-            "ATURAN PENTING #3 — BEDAKAN TANGGAL HEADER DOKUMEN KONTROL"
-            " DENGAN TANGGAL AKTUAL KEGIATAN: banyak formulir perusahaan"
-            " (One Point Lesson, Daftar Hadir, IK/SOP, dsb.) memiliki"
-            " header 'document control' berisi field seperti 'No."
-            " Dokumen', 'Tanggal Berlaku', 'Revisi', dan 'Halaman'."
-            " Field-field ini menjelaskan STATUS TEMPLATE/FORMULIR itu"
-            " sendiri (kapan versi form tersebut disahkan untuk dipakai"
-            " secara umum di perusahaan), BUKAN tanggal kejadian/aktivitas"
-            " spesifik yang dicatat memakai formulir itu. JANGAN PERNAH"
-            " melaporkan 'Tanggal Berlaku' pada header dokumen kontrol"
-            " sebagai anomali/inkonsistensi timeline proyek — itu bukan"
-            " indikasi kesalahan dan bukan pembanding yang valid. Tanggal"
-            " AKTUAL kegiatan biasanya berada di badan formulir (misal"
-            " field 'Tanggal/Jam Pelaksanaan', tanggal tulisan tangan pada"
-            " baris data, dsb.), bukan di header dokumen. Untuk SETIAP"
-            " tanggal yang diekstrak dari sebuah formulir, WAJIB sebutkan"
-            " secara eksplisit sumbernya: 'tanggal berlaku template"
-            " (header dokumen kontrol)' atau 'tanggal aktual pelaksanaan"
-            " (isi formulir)'. HANYA tanggal aktual pelaksanaan yang"
-            " relevan dibandingkan dengan timeline proyek.\n\n"
-            "ATURAN PENTING #4 — MEMBACA TABEL IMPACT/MANFAAT DENGAN"
-            " AMBANG BATAS SKALA: kalau dokumen memuat tabel dengan"
-            " format kategori impact diikuti 2 kolom ambang batas/skala"
-            " penilaian (misal 'Mengurangi ≤ 1%' vs 'Mengurangi >5%') dan"
-            " 1 kolom penjelasan/keterangan di ujung kanan, kolom ambang"
-            " batas itu BUKAN bukti pencapaian aktual — HANYA kolom"
-            " penjelasan/keterangan yang berisi pencapaian aktual proyek"
-            " ini. Kalau kolom penjelasan untuk suatu kategori KOSONG,"
-            " laporkan kategori itu sebagai 'TIDAK ADA"
-            " PENJELASAN/PENCAPAIAN YANG DILAPORKAN', JANGAN mengarang"
-            " angka dari kolom ambang batas.\n\n"
-            "Ekstrak SETIAP elemen berikut secara VERBATIM/detail (kutip isi"
-            " aslinya, jangan diringkas berlebihan):\n\n"
-            "1. MASALAH UTAMA: kondisi awal, DATA KUANTITATIF pendukung"
-            " (sebutkan angka, satuan, DAN periode/metode pengukurannya"
-            " persis, misal 'rata-rata 3 bulan Jan-Mar 2024'), 5W1H"
-            " lengkap (What/Where/When/Who/Why/How), evidence 5G.\n"
-            "2. TARGET AWAL (SMART): kutip persis angka/kalimat target yang"
-            " ditetapkan di awal dokumen (eksplisit ATAU implisit sesuai"
-            " Aturan #1).\n"
-            "3. FISHBONE DIAGRAM: untuk SETIAP cabang/duri yang ada, sebutkan"
-            " (a) kategori 4M yang dipakai dokumen (Man/Method/"
-            "Machine/Material), (b) isi penyebab yang dituliskan di cabang"
-            " itu. Buat sebagai daftar, contoh: 'Man: operator kurang"
-            " terlatih', 'Machine: mesin sering aus'.\n"
-            "4. ANALISIS 5 WHYS: kutip SETIAP baris why secara berurutan"
-            " dan lengkap (why 1 sampai why terakhir) apa adanya, jangan"
-            " diringkas. Sebutkan juga apa root cause final yang diklaim"
-            " dokumen.\n"
-            "5. ACTION PLAN & PIC: daftar rencana perbaikan beserta"
-            " penanggung jawab (PIC) BESERTA JABATAN/PERANNYA bila"
-            " disebutkan (misal 'Budi - Teknisi Mesin'), dan status FUP"
-            " (Form Usulan Perbaikan) bila disebutkan.\n"
-            "6. IMPLEMENTASI: bukti pelaksanaan (dokumentasi, foto"
-            " before/after, laporan trial).\n"
-            "7. HASIL AKHIR/PENCAPAIAN (termasuk SAVING): kutip persis angka"
-            " hasil akhir yang dilaporkan, SATUAN, dan periode/metode"
-            " pengukurannya persis (untuk dibandingkan dengan metode"
-            " pengukuran kondisi awal di poin 1) — eksplisit ATAU implisit"
-            " sesuai Aturan #1. Ikuti Aturan #4 kalau data ini berasal dari"
-            " tabel impact bertingkat ambang batas.\n"
-            "8. STANDARDISASI: dokumen IK/SOP/OPL/CILT/PM/Centerline yang"
-            " dibuat, status validasi/approval, bukti sosialisasi"
-            " (absensi — sebutkan SIAPA/JABATAN APA yang mengikuti bila"
-            " ada), dan bukti replikasi ke area/mesin lain (sebutkan"
-            " karakteristik area tujuan replikasi bila disebutkan, untuk"
-            " menilai apakah memang sejenis/sepadan dengan area asal"
-            " masalah). Untuk setiap tanggal yang ditemukan di dokumen"
-            " standardisasi/sosialisasi ini, WAJIB ikuti Aturan #3 di"
-            " atas — bedakan tanggal berlaku template dengan tanggal"
-            " aktual pelaksanaan sebelum menyimpulkan apa pun.\n"
-            "9. KUALITAS PENULISAN: catat kalau ada typo/salah ketik yang"
-            " cukup mengganggu, kalimat ambigu/membingungkan, atau bagian"
-            " yang tidak konsisten penomoran/formatnya (untuk bahan"
-            " feedback ke peserta, bukan untuk skor rubrik). JANGAN"
-            " memasukkan tanggal berlaku template dokumen kontrol (Aturan"
-            " #3) sebagai contoh kesalahan penulisan di sini.\n\n"
-            "Jika suatu elemen tidak ditemukan di dokumen sama sekali (baik"
-            " eksplisit maupun implisit), nyatakan dengan jelas 'TIDAK"
-            " DITEMUKAN' — jangan mengarang."
-        )
-        laporan_ekstraksi = panggil_ai_dengan_retry(
-            [gemini_file, prompt_1], "Ekstraksi Bukti Dokumen [1/8]",
-            status_box,
-        )
+                # --- 1. Ekstraksi Bukti Dokumen ---
+                prompt_1 = (
+                    "Anda berperan sebagai Analis Ekstraksi Bukti Dokumen Kaizen"
+                    " yang teliti dan hanya melaporkan fakta yang benar-benar"
+                    " tertulis/tervisualisasi di dokumen, tanpa mengarang, karena"
+                    " akan dipakai untuk analisis koherensi logika, bukan sekadar"
+                    " cek ada/tidak.\n\n"
+                    "ATURAN PENTING #1 — CARI MAKNA TERSURAT DAN TERSIRAT: banyak"
+                    " dokumen TIDAK menuliskan masalah/target/goal/hasil-saving"
+                    " dengan label eksplisit yang jelas (misal tidak ada section"
+                    " 'Target:' secara langsung), tapi maknanya tersirat di"
+                    " kalimat lain (misal disebutkan sekilas dalam narasi solusi"
+                    " atau kesimpulan). Untuk SETIAP elemen di poin 1, 2, dan 7 di"
+                    " bawah: kalau tidak ada label eksplisit, telusuri SELURUH"
+                    " dokumen untuk kalimat yang secara implisit mengandung makna"
+                    " elemen itu. Kutip kalimat aslinya, sebutkan halaman berapa,"
+                    " DAN tandai dengan jelas apakah itu 'EKSPLISIT' (ada label"
+                    " jelas) atau 'IMPLISIT/TERSIRAT' (disimpulkan dari kalimat"
+                    " lain, sebutkan dari kalimat mana).\n\n"
+                    "ATURAN PENTING #2 — JANGAN CUMA SEBUT HALAMAN: setiap kali"
+                    " merujuk suatu halaman/bagian dokumen, WAJIB jelaskan APA ISI"
+                    " KONKRETNYA dan APA ANGKA/MEASUREMENT-nya di situ. DILARANG"
+                    " menulis rujukan kosong seperti 'ada di halaman 24 dan 31'"
+                    " tanpa penjelasan — itu tidak berguna untuk penilaian yang"
+                    " butuh angka pengukuran jelas sebagai faktor penentu.\n\n"
+                    "ATURAN PENTING #3 — BEDAKAN TANGGAL HEADER DOKUMEN KONTROL"
+                    " DENGAN TANGGAL AKTUAL KEGIATAN: banyak formulir perusahaan"
+                    " (One Point Lesson, Daftar Hadir, IK/SOP, dsb.) memiliki"
+                    " header 'document control' berisi field seperti 'No."
+                    " Dokumen', 'Tanggal Berlaku', 'Revisi', dan 'Halaman'."
+                    " Field-field ini menjelaskan STATUS TEMPLATE/FORMULIR itu"
+                    " sendiri (kapan versi form tersebut disahkan untuk dipakai"
+                    " secara umum di perusahaan), BUKAN tanggal kejadian/aktivitas"
+                    " spesifik yang dicatat memakai formulir itu. JANGAN PERNAH"
+                    " melaporkan 'Tanggal Berlaku' pada header dokumen kontrol"
+                    " sebagai anomali/inkonsistensi timeline proyek — itu bukan"
+                    " indikasi kesalahan dan bukan pembanding yang valid. Tanggal"
+                    " AKTUAL kegiatan biasanya berada di badan formulir (misal"
+                    " field 'Tanggal/Jam Pelaksanaan', tanggal tulisan tangan pada"
+                    " baris data, dsb.), bukan di header dokumen. Untuk SETIAP"
+                    " tanggal yang diekstrak dari sebuah formulir, WAJIB sebutkan"
+                    " secara eksplisit sumbernya: 'tanggal berlaku template"
+                    " (header dokumen kontrol)' atau 'tanggal aktual pelaksanaan"
+                    " (isi formulir)'. HANYA tanggal aktual pelaksanaan yang"
+                    " relevan dibandingkan dengan timeline proyek.\n\n"
+                    "ATURAN PENTING #4 — MEMBACA TABEL IMPACT/MANFAAT DENGAN"
+                    " AMBANG BATAS SKALA: kalau dokumen memuat tabel dengan"
+                    " format kategori impact diikuti 2 kolom ambang batas/skala"
+                    " penilaian (misal 'Mengurangi ≤ 1%' vs 'Mengurangi >5%') dan"
+                    " 1 kolom penjelasan/keterangan di ujung kanan, kolom ambang"
+                    " batas itu BUKAN bukti pencapaian aktual — HANYA kolom"
+                    " penjelasan/keterangan yang berisi pencapaian aktual proyek"
+                    " ini. Kalau kolom penjelasan untuk suatu kategori KOSONG,"
+                    " laporkan kategori itu sebagai 'TIDAK ADA"
+                    " PENJELASAN/PENCAPAIAN YANG DILAPORKAN', JANGAN mengarang"
+                    " angka dari kolom ambang batas.\n\n"
+                    "Ekstrak SETIAP elemen berikut secara VERBATIM/detail (kutip isi"
+                    " aslinya, jangan diringkas berlebihan):\n\n"
+                    "1. MASALAH UTAMA: kondisi awal, DATA KUANTITATIF pendukung"
+                    " (sebutkan angka, satuan, DAN periode/metode pengukurannya"
+                    " persis, misal 'rata-rata 3 bulan Jan-Mar 2024'), 5W1H"
+                    " lengkap (What/Where/When/Who/Why/How), evidence 5G.\n"
+                    "2. TARGET AWAL (SMART): kutip persis angka/kalimat target yang"
+                    " ditetapkan di awal dokumen (eksplisit ATAU implisit sesuai"
+                    " Aturan #1).\n"
+                    "3. FISHBONE DIAGRAM: untuk SETIAP cabang/duri yang ada, sebutkan"
+                    " (a) kategori 4M yang dipakai dokumen (Man/Method/"
+                    "Machine/Material), (b) isi penyebab yang dituliskan di cabang"
+                    " itu. Buat sebagai daftar, contoh: 'Man: operator kurang"
+                    " terlatih', 'Machine: mesin sering aus'.\n"
+                    "4. ANALISIS 5 WHYS: kutip SETIAP baris why secara berurutan"
+                    " dan lengkap (why 1 sampai why terakhir) apa adanya, jangan"
+                    " diringkas. Sebutkan juga apa root cause final yang diklaim"
+                    " dokumen.\n"
+                    "5. ACTION PLAN & PIC: daftar rencana perbaikan beserta"
+                    " penanggung jawab (PIC) BESERTA JABATAN/PERANNYA bila"
+                    " disebutkan (misal 'Budi - Teknisi Mesin'), dan status FUP"
+                    " (Form Usulan Perbaikan) bila disebutkan.\n"
+                    "6. IMPLEMENTASI: bukti pelaksanaan (dokumentasi, foto"
+                    " before/after, laporan trial).\n"
+                    "7. HASIL AKHIR/PENCAPAIAN (termasuk SAVING): kutip persis angka"
+                    " hasil akhir yang dilaporkan, SATUAN, dan periode/metode"
+                    " pengukurannya persis (untuk dibandingkan dengan metode"
+                    " pengukuran kondisi awal di poin 1) — eksplisit ATAU implisit"
+                    " sesuai Aturan #1. Ikuti Aturan #4 kalau data ini berasal dari"
+                    " tabel impact bertingkat ambang batas.\n"
+                    "8. STANDARDISASI: dokumen IK/SOP/OPL/CILT/PM/Centerline yang"
+                    " dibuat, status validasi/approval, bukti sosialisasi"
+                    " (absensi — sebutkan SIAPA/JABATAN APA yang mengikuti bila"
+                    " ada), dan bukti replikasi ke area/mesin lain (sebutkan"
+                    " karakteristik area tujuan replikasi bila disebutkan, untuk"
+                    " menilai apakah memang sejenis/sepadan dengan area asal"
+                    " masalah). Untuk setiap tanggal yang ditemukan di dokumen"
+                    " standardisasi/sosialisasi ini, WAJIB ikuti Aturan #3 di"
+                    " atas — bedakan tanggal berlaku template dengan tanggal"
+                    " aktual pelaksanaan sebelum menyimpulkan apa pun.\n"
+                    "9. KUALITAS PENULISAN: catat kalau ada typo/salah ketik yang"
+                    " cukup mengganggu, kalimat ambigu/membingungkan, atau bagian"
+                    " yang tidak konsisten penomoran/formatnya (untuk bahan"
+                    " feedback ke peserta, bukan untuk skor rubrik). JANGAN"
+                    " memasukkan tanggal berlaku template dokumen kontrol (Aturan"
+                    " #3) sebagai contoh kesalahan penulisan di sini.\n\n"
+                    "Jika suatu elemen tidak ditemukan di dokumen sama sekali (baik"
+                    " eksplisit maupun implisit), nyatakan dengan jelas 'TIDAK"
+                    " DITEMUKAN' — jangan mengarang."
+                )
+                laporan_ekstraksi = panggil_ai_dengan_retry(
+                    [gemini_file, prompt_1], "Ekstraksi Bukti Dokumen [1/8]",
+                    status_box,
+                )
 
-        # --- 2. Verifikasi Bukti Visual & Kelayakan (multimodal) ---
-        # Agen ini WAJIB punya akses langsung ke file PDF (bukan cuma teks
-        # ringkasan) karena tugasnya melihat foto/gambar secara visual dan
-        # menilai kelayakan dasar proyek — dua hal yang tidak bisa dicek
-        # dari ringkasan teks tahap ekstraksi saja.
-        prompt_verifikasi = (
-            """Anda adalah Analis Verifikasi Bukti Visual & Kelayakan (senior) yang SANGAT KRITIS terhadap kualitas dasar submission Kaizen. Banyak peserta kompetisi ini belum paham konsep PDCA dengan baik, dan beberapa submission bahkan BUKAN merupakan proyek improvement sama sekali (misal: cuma laporan rutin, pengadaan barang tanpa problem-solving, atau aktivitas maintenance biasa yang dibungkus format Kaizen). Tugas Anda membongkar ini dengan membaca LANGSUNG dokumen PDF (termasuk semua foto/gambar/diagram di dalamnya), bukan cuma ringkasan.
+                # --- 2. Verifikasi Bukti Visual & Kelayakan (multimodal) ---
+                prompt_verifikasi = (
+                    """Anda adalah Analis Verifikasi Bukti Visual & Kelayakan (senior) yang SANGAT KRITIS terhadap kualitas dasar submission Kaizen. Banyak peserta kompetisi ini belum paham konsep PDCA dengan baik, dan beberapa submission bahkan BUKAN merupakan proyek improvement sama sekali (misal: cuma laporan rutin, pengadaan barang tanpa problem-solving, atau aktivitas maintenance biasa yang dibungkus format Kaizen). Tugas Anda membongkar ini dengan membaca LANGSUNG dokumen PDF (termasuk semua foto/gambar/diagram di dalamnya), bukan cuma ringkasan.
 
 ATURAN WAJIB:
 1. Di kolom "catatan", JANGAN cuma menyebut nomor halaman — selalu jelaskan ISI KONKRET apa yang ada di situ (dan angka/measurement-nya kalau relevan). Pertimbangkan juga bahwa target/masalah/hasil kadang tertulis IMPLISIT/tersirat di kalimat lain, bukan cuma yang berlabel eksplisit — telusuri keduanya.
 2. """
-            + (
-                "BEDAKAN tanggal berlaku TEMPLATE formulir (header document"
-                " control: field \"No. Dokumen\", \"Tanggal Berlaku\","
-                " \"Revisi\", \"Halaman\") dengan tanggal AKTUAL pelaksanaan"
-                " kegiatan (biasanya di badan formulir, misal field"
-                " \"Tanggal/Jam Pelaksanaan\" atau tanggal tulisan tangan"
-                " pada baris data). JANGAN melaporkan tanggal berlaku"
-                " template sebagai anomali/inkonsistensi dibanding timeline"
-                " proyek — itu bukan pembanding yang valid. Kalau"
-                " melaporkan temuan terkait tanggal, sebutkan eksplisit"
-                " jenis tanggalnya (tanggal berlaku template ATAU tanggal"
-                " aktual pelaksanaan)."
-            )
-            + """
+                    + (
+                        "BEDAKAN tanggal berlaku TEMPLATE formulir (header document"
+                        " control: field \"No. Dokumen\", \"Tanggal Berlaku\","
+                        " \"Revisi\", \"Halaman\") dengan tanggal AKTUAL pelaksanaan"
+                        " kegiatan (biasanya di badan formulir, misal field"
+                        " \"Tanggal/Jam Pelaksanaan\" atau tanggal tulisan tangan"
+                        " pada baris data). JANGAN melaporkan tanggal berlaku"
+                        " template sebagai anomali/inkonsistensi dibanding timeline"
+                        " proyek — itu bukan pembanding yang valid. Kalau"
+                        " melaporkan temuan terkait tanggal, sebutkan eksplisit"
+                        " jenis tanggalnya (tanggal berlaku template ATAU tanggal"
+                        " aktual pelaksanaan)."
+                    )
+                    + """
 
-Lakukan 3 pemeriksaan berikut:
+Lakukan 4 pemeriksaan berikut:
 
 ## A. GATE CHECK — Kelayakan sebagai Proyek Improvement
 Apakah dokumen ini benar-benar proyek continuous improvement yang valid? Tanda-tanda TIDAK LAYAK: tidak ada kondisi awal/masalah yang didefinisikan dengan jelas, tidak ada perubahan before-after yang nyata, tidak ada analisis akar masalah sama sekali (langsung lompat ke solusi), atau isinya sebenarnya laporan administratif/aktivitas rutin yang dipaksakan ke format Kaizen. Beri verdict: "LAYAK" (jelas proyek improvement yang sah), "PERLU PERHATIAN" (ada keraguan, perlu ditinjau juri), atau "TIDAK LAYAK" (bukan proyek improvement).
@@ -547,19 +484,26 @@ Untuk MASING-MASING elemen (What, Where, When, Who, Why, How — atau elemen ser
 ## C. AUDIT FOTO & BUKTI VISUAL
 Untuk SETIAP foto/gambar/diagram penting yang kamu lihat di dokumen (terutama foto before/after, dan diagram fishbone/flow), deskripsikan singkat apa yang benar-benar terlihat di foto itu, lalu bandingkan dengan klaim teks di sekitarnya. Tandai SESUAI kalau foto benar-benar mendukung klaim (misal foto "before" menunjukkan kondisi rusak/bermasalah yang dideskripsikan, foto "after" menunjukkan perbaikan yang sama), atau MERAGUKAN kalau foto tidak jelas mendukung klaim, tidak relevan, tampak diambil dari konteks lain, atau foto before/after terlihat identik/tidak menunjukkan perubahan nyata.
 
-Keluarkan HANYA JSON array valid (satu array datar berisi semua temuan A+B+C, dibedakan lewat field "kategori"), dengan skema persis:
-[{"kategori": "GATE CHECK", "item": "Kelayakan Proyek Improvement", "status": "LAYAK", "catatan": "alasan spesifik merujuk isi dokumen"}, {"kategori": "5W1H", "item": "How", "status": "TERTUKAR/TIDAK SESUAI", "catatan": "isi kolom How sebenarnya menjelaskan lokasi (Where), bukan metode"}, {"kategori": "FOTO", "item": "Foto halaman 8 (before)", "status": "SESUAI", "catatan": "menunjukkan kondisi mesin sesuai deskripsi masalah"}]"""
-        )
-        raw_verifikasi = panggil_ai_dengan_retry(
-            [gemini_file, prompt_verifikasi],
-            "Verifikasi Bukti Visual & Kelayakan [2/8]",
-            status_box,
-            config=GENERATION_CONFIG_JSON,
-        )
-        hasil_verifikasi_json = bersihkan_dan_parse_json(raw_verifikasi)
+## D. AUDIT KELENGKAPAN FORM USULAN PERBAIKAN (FUP)
+Cari secara spesifik dokumen/halaman yang diklaim sebagai Form Usulan Perbaikan (FUP). Dokumen FUP yang sah HARUS memenuhi syarat visual berikut: 
+1. Memiliki Kop Surat perusahaan resmi. 
+2. Terdapat judul/keyword 'Form Usulan Perbaikan' atau 'FUP'. 
+3. Terdapat kolom tanda tangan persetujuan (Approval) yang SUDAH DITANDATANGANI. 
+JANGAN menganggap form standardisasi (OPL/IK/SOP) atau daftar hadir sosialisasi sebagai FUP. Tandai status sebagai 'ADA DAN APPROVED' (jika ada form FUP dan sudah di-acc), 'ADA TAPI BELUM APPROVED' (jika ada form FUP tapi kolom tanda tangan kosong/belum lengkap), atau 'TIDAK DITEMUKAN / SALAH DOKUMEN' (jika yang dilampirkan adalah dokumen lain seperti OPL/SOP atau tidak ada sama sekali).
 
-        # --- 3. Audit Konsistensi Metodologi PDCA (Traceability/Golden Thread) ---
-        prompt_alur = f"""Anda adalah Analis Audit Konsistensi Metodologi PDCA (QC-Story) yang menelusuri "benang merah" (golden thread): apakah tiap tools di tiap fase PDCA benar-benar tersambung MASUK AKAL secara teknis/operasional ke tools sebelum dan sesudahnya — bukan cuma sama-sama ada di dokumen.
+Keluarkan HANYA JSON array valid (satu array datar berisi semua temuan A+B+C+D, dibedakan lewat field "kategori"), dengan skema persis:
+[{"kategori": "GATE CHECK", "item": "Kelayakan Proyek Improvement", "status": "LAYAK", "catatan": "alasan spesifik merujuk isi dokumen"}, {"kategori": "5W1H", "item": "How", "status": "TERTUKAR/TIDAK SESUAI", "catatan": "isi kolom How sebenarnya menjelaskan lokasi (Where), bukan metode"}, {"kategori": "FOTO", "item": "Foto halaman 8 (before)", "status": "SESUAI", "catatan": "menunjukkan kondisi mesin sesuai deskripsi masalah"}, {"kategori": "FUP", "item": "Form Usulan Perbaikan", "status": "TIDAK DITEMUKAN / SALAH DOKUMEN", "catatan": "yang dilampirkan adalah form OPL, bukan FUP resmi"}]"""
+                )
+                raw_verifikasi = panggil_ai_dengan_retry(
+                    [gemini_file, prompt_verifikasi],
+                    "Verifikasi Bukti Visual & Kelayakan [2/8]",
+                    status_box,
+                    config=GENERATION_CONFIG_JSON,
+                )
+                hasil_verifikasi_json = bersihkan_dan_parse_json(raw_verifikasi)
+
+                # --- 3. Audit Konsistensi Metodologi PDCA (Traceability/Golden Thread) ---
+                prompt_alur = f"""Anda adalah Analis Audit Konsistensi Metodologi PDCA (QC-Story) yang menelusuri "benang merah" (golden thread): apakah tiap tools di tiap fase PDCA benar-benar tersambung MASUK AKAL secara teknis/operasional ke tools sebelum dan sesudahnya — bukan cuma sama-sama ada di dokumen.
 
 Gunakan pengetahuan umum troubleshooting industri sebagai patokan kewajaran sebab-akibat. Contoh MASUK AKAL: "mesin macet" -> kenapa? "bearing aus" -> kenapa? "kurang pelumasan" -> kenapa? "tidak ada jadwal preventive maintenance". Contoh TIDAK MASUK AKAL: "mesin macet" tiba-tiba dijawab "operator kurang training" tanpa penjelasan penghubung.
 
@@ -580,7 +524,7 @@ P3. "Data/Losses ke Target SMART": apakah target yang ditetapkan punya justifika
 P4. "Problem Statement ke Kepala Ikan Fishbone": apakah efek/masalah utama di kepala ikan SAMA dengan problem statement, atau melenceng ke masalah lain?
 P5. "Kategori 4M pada Fishbone": untuk SETIAP cabang, apakah penyebabnya masuk akal di kategori 4M itu? Sebutkan SPESIFIK cabang yang salah kategori kalau ada.
 P6. "Cabang Fishbone ke Rantai Why-Why": apakah analisis why-why benar-benar berangkat dari salah satu cabang/penyebab di fishbone (bukan topik baru yang tiba-tiba muncul)? DAN untuk SETIAP pasangan why berurutan, apakah why berikutnya penyebab TEKNIS LANGSUNG dari why sebelumnya (bukan cuma berkaitan tema)? Sebutkan link why-ke-berapa yang lemah/meloncat kalau ada.
-P7. "Root Cause Akhir ke Bukti Pendukung": apakah root cause akhir yang diklaim benar-benar didukung data/dokumen/report trial/visual konkret, atau cuma opini/dugaan tanpa bukti?
+P7. "Root Cause Akhir ke Bukti Pendukung": KRITIKAL: Evaluasi apakah SETIAP root cause akhir benar-benar merupakan FAKTA yang BISA DIBUKTIKAN secara objektif di dokumen, atau hanya berupa ASUMSI/POTENSI/HIPOTESIS (misalnya: peserta mengklaim "terjadi reaksi kimia X" tapi tidak ada lampiran hasil uji lab, atau mengklaim "operator kelelahan" tanpa data beban kerja). Jika ada root cause yang bersifat spekulatif, asumtif, atau "masih potensi" tanpa pembuktian data/validasi teknis di dokumen, status P7 WAJIB "LEMAH". Sebutkan secara spesifik root cause mana yang hanya berupa tebakan/potensi.
 
 ## FASE DO (D1-D4)
 D1. "Root Cause ke Action Plan": apakah action plan menyasar ROOT CAUSE AKHIR (why paling dalam), bukan cuma menambal gejala di why tingkat awal?
@@ -598,63 +542,63 @@ A2. "Standardisasi ke Validasi/Approval": apakah standar yang disosialisasikan (
 A3. "Sosialisasi ke Sasaran yang Tepat": apakah pihak yang mengikuti sosialisasi (dari bukti absensi) memang pihak yang relevan/terlibat di area masalah (sesuai Who/PIC di 5W1H)? Gunakan tanggal AKTUAL pelaksanaan sosialisasi (bukan tanggal berlaku template formulir) kalau relevan untuk memeriksa urutan waktu.
 A4. "Standardisasi/Action Plan ke Kelayakan Replikasi": apakah area/mesin yang diklaim direplikasi punya karakteristik yang sepadan/sejenis dengan area asal masalah (sehingga replikasi itu masuk akal secara teknis), bukan cuma diklaim "direplikasi" tanpa penjelasan kesesuaian?
 
-Untuk tiap titik, beri verdict SALAH SATU dari: "KONSISTEN" (jelas dan masuk akal, didukung angka/isi konkret), "LEMAH" (ada tapi kurang detail/agak dipaksakan/tidak ada angka jelas), atau "TIDAK KONSISTEN" (ada loncatan logika/tidak nyambung/tidak ditemukan).
+Untuk tiap titik, beri verdict SALAH SATU dari: "KONSISTEN" (jelas dan masuk akal, didukung angka/isi konkret), "LEMAH" (ada tapi kurang detail/agak dipaksakan/tidak ada angka jelas, atau root cause masih bersifat "potensi"), atau "TIDAK KONSISTEN" (ada loncatan logika/tidak nyambung/tidak ditemukan).
 
 Keluarkan HANYA JSON array valid dengan skema persis (field "fase" WAJIB salah satu dari "PLAN", "DO", "CHECK", "ACT"):
 [{{"no": "P1", "fase": "PLAN", "tahap": "5G ke 5W1H", "verdict": "KONSISTEN", "temuan": "penjelasan spesifik merujuk isi dan angka konkret dari dokumen, sebutkan halaman DAN isinya"}}]"""
-        raw_alur_logika = panggil_ai_dengan_retry(
-            prompt_alur,
-            "Audit Konsistensi Metodologi PDCA [3/8]",
-            status_box,
-            config=GENERATION_CONFIG_JSON,
-        )
-        hasil_alur_json = bersihkan_dan_parse_json(raw_alur_logika)
+                raw_alur_logika = panggil_ai_dengan_retry(
+                    prompt_alur,
+                    "Audit Konsistensi Metodologi PDCA [3/8]",
+                    status_box,
+                    config=GENERATION_CONFIG_JSON,
+                )
+                hasil_alur_json = bersihkan_dan_parse_json(raw_alur_logika)
 
-        # --- 4. Analisis Kritis (Tinjauan Independen) ---
-        prompt_2 = (
-            "Anda berperan sebagai Analis Kritis (Tinjauan Independen)"
-            " yang skeptis secara metodologis dan sangat teliti dalam"
-            " audit Kaizen ini. Tugas Anda mengidentifikasi kelemahan"
-            " KOHERENSI dan LOGIKA, bukan cuma kelengkapan administratif,"
-            " berdasarkan fakta yang ada (jangan mengarang temuan). JANGAN"
-            " cuma menyebut nomor halaman — selalu jelaskan ISI KONKRET dan"
-            " ANGKA yang jadi dasar analisis Anda.\n\n"
-            f"Fakta Kasus:\n{laporan_ekstraksi}\n\n"
-            "HASIL AUDIT KONSISTENSI METODOLOGI PDCA (terorganisir per fase"
-            f" PLAN/DO/CHECK/ACT, jadikan bahan utama analisis"
-            f" Anda):\n{raw_alur_logika}\n\n"
-            "Periksa dan pertanyakan secara spesifik, dengan mengacu ke"
-            " hasil audit di atas:\n"
-            "- Titik mana saja (di fase manapun) yang berstatus 'LEMAH'"
-            " atau 'TIDAK KONSISTEN' — jelaskan isi temuannya dan kenapa"
-            " itu masalah serius untuk kredibilitas penilaian.\n"
-            "- Kelemahan bukti, celah antara masalah dan solusi, kurangnya"
-            " data pendukung, atau potensi manipulasi angka saving.\n\n"
-            "Sertakan alasan yang merujuk ke fakta di atas untuk tiap"
-            " temuan."
-        )
-        temuan_analisis_kritis = panggil_ai_dengan_retry(
-            prompt_2, "Analisis Kritis [4/8]", status_box
-        )
+                # --- 4. Analisis Kritis (Tinjauan Independen) ---
+                prompt_2 = (
+                    "Anda berperan sebagai Analis Kritis (Tinjauan Independen)"
+                    " yang skeptis secara metodologis dan sangat teliti dalam"
+                    " audit Kaizen ini. Tugas Anda mengidentifikasi kelemahan"
+                    " KOHERENSI dan LOGIKA, bukan cuma kelengkapan administratif,"
+                    " berdasarkan fakta yang ada (jangan mengarang temuan). JANGAN"
+                    " cuma menyebut nomor halaman — selalu jelaskan ISI KONKRET dan"
+                    " ANGKA yang jadi dasar analisis Anda.\n\n"
+                    f"Fakta Kasus:\n{laporan_ekstraksi}\n\n"
+                    "HASIL AUDIT KONSISTENSI METODOLOGI PDCA (terorganisir per fase"
+                    f" PLAN/DO/CHECK/ACT, jadikan bahan utama analisis"
+                    f" Anda):\n{raw_alur_logika}\n\n"
+                    "Periksa dan pertanyakan secara spesifik, dengan mengacu ke"
+                    " hasil audit di atas:\n"
+                    "- Titik mana saja (di fase manapun) yang berstatus 'LEMAH'"
+                    " atau 'TIDAK KONSISTEN' — jelaskan isi temuannya dan kenapa"
+                    " itu masalah serius untuk kredibilitas penilaian.\n"
+                    "- Kelemahan bukti, celah antara masalah dan solusi, kurangnya"
+                    " data pendukung, atau potensi manipulasi angka saving.\n\n"
+                    "Sertakan alasan yang merujuk ke fakta di atas untuk tiap"
+                    " temuan."
+                )
+                temuan_analisis_kritis = panggil_ai_dengan_retry(
+                    prompt_2, "Analisis Kritis [4/8]", status_box
+                )
 
-        # --- 5. Analisis Konfirmatif (Tinjauan Pembanding) ---
-        prompt_3 = (
-            "Anda berperan sebagai Analis Konfirmatif (Tinjauan Pembanding)"
-            " dalam audit Kaizen ini. Tugas Anda mengevaluasi HANYA"
-            " berdasarkan fakta yang tersedia, bukan asumsi baik yang"
-            " tidak berdasar, untuk menyeimbangkan temuan Analisis Kritis"
-            " di atas.\n\n"
-            f"Fakta:\n{laporan_ekstraksi}\n\n"
-            f"Temuan Analisis Kritis:\n{temuan_analisis_kritis}\n\n"
-            "Bantah temuan yang tidak berdasar dan soroti nilai tambah yang"
-            " sudah terbukti dari fakta di atas."
-        )
-        temuan_analisis_konfirmatif = panggil_ai_dengan_retry(
-            prompt_3, "Analisis Konfirmatif [5/8]", status_box
-        )
+                # --- 5. Analisis Konfirmatif (Tinjauan Pembanding) ---
+                prompt_3 = (
+                    "Anda berperan sebagai Analis Konfirmatif (Tinjauan Pembanding)"
+                    " dalam audit Kaizen ini. Tugas Anda mengevaluasi HANYA"
+                    " berdasarkan fakta yang tersedia, bukan asumsi baik yang"
+                    " tidak berdasar, untuk menyeimbangkan temuan Analisis Kritis"
+                    " di atas.\n\n"
+                    f"Fakta:\n{laporan_ekstraksi}\n\n"
+                    f"Temuan Analisis Kritis:\n{temuan_analisis_kritis}\n\n"
+                    "Bantah temuan yang tidak berdasar dan soroti nilai tambah yang"
+                    " sudah terbukti dari fakta di atas."
+                )
+                temuan_analisis_konfirmatif = panggil_ai_dengan_retry(
+                    prompt_3, "Analisis Konfirmatif [5/8]", status_box
+                )
 
-        # --- 6. Sintesis Skoring Rubrik (21 Poin) ---
-        prompt_4 = f"""Anda adalah modul Sintesis Skoring Rubrik yang wajib bersikap objektif, konsisten, dan KRITIS TERHADAP ISI — bukan cuma mengecek "ada/tidak ada elemen", tapi memverifikasi apakah isinya benar secara logika, tepat kategorinya, dan nyambung alur PDCA-nya.
+                # --- 6. Sintesis Skoring Rubrik (21 Poin) ---
+                prompt_4 = f"""Anda adalah modul Sintesis Skoring Rubrik yang wajib bersikap objektif, konsisten, dan KRITIS TERHADAP ISI — bukan cuma mengecek "ada/tidak ada elemen", tapi memverifikasi apakah isinya benar secara logika, tepat kategorinya, dan nyambung alur PDCA-nya.
 
 ATURAN PENILAIAN:
 - Beri skor SESUAI pilihan yang tersedia per kriteria (jangan beri skor di luar pilihan yang tercantum di rubrik).
@@ -668,9 +612,9 @@ ATURAN PENILAIAN:
   * Kriteria 6 (Fishbone) & 7 (Pemetaan 4M): pakai titik P4 dan P5.
   * Kriteria 8 (Hubungan Akar Penyebab): pakai titik P6.
   * Kriteria 9 (Bukti Akar Penyebab): pakai titik P7.
-  * Kriteria 10 (Ketepatan Root Cause): pakai titik P6 dan P7 bersama.
+  * Kriteria 10 (Ketepatan Root Cause): pakai titik P6 dan P7 bersama. JANGAN berikan skor 2 jika P7 berstatus LEMAH akibat adanya root cause yang bersifat asumtif, spekulatif, atau berupa "potensi" yang belum dibuktikan validitasnya secara teknis (misal: menebak ada reaksi kimia tanpa uji lab). Root cause final haruslah fakta teruji.
   * Kriteria 11 (Action Plan & PIC) & 12 (Rencana Perbaikan): pakai titik D1 dan D2.
-  * Kriteria 13 (FUP): pakai titik D3.
+  * Kriteria 13 (FUP): Berdasarkan aturan IMS Perusahaan, FUP (Form Usulan Perbaikan) ADALAH MUTLAK WAJIB untuk SEMUA jenis project improvement tanpa terkecuali, sebagai alat identifikasi risiko tersembunyi. JANGAN PERNAH memberikan skor 5 jika dokumen FUP yang sah (hasil Verifikasi Visual D: ada kop surat, judul FUP, dan sudah ditandatangani/approved) tidak dilampirkan, meskipun action plan sudah berjalan atau ada dokumen OPL/Sosialisasi. Jika tidak ada bukti FUP yang sah, SKOR WAJIB NOL (0).
   * Kriteria 14 (Pelaksanaan): pakai titik D4.
   * Kriteria 16 (Pencapaian Target): pakai titik C1 dan C2 BERSAMA — kalau metodologi pengukuran (C1) tidak sepadan, skor WAJIB ikut turun meski angkanya kelihatan mencapai target.
   * Kriteria 17 (Pengecekan Hasil): pakai titik C1.
@@ -698,7 +642,7 @@ RUBRIK LENGKAP (deskripsi tiap tingkat skor):
 FAKTA HASIL EKSTRAKSI DOKUMEN:
 {laporan_ekstraksi}
 
-HASIL VERIFIKASI KELAYAKAN, 5W1H & FOTO:
+HASIL VERIFIKASI KELAYAKAN, 5W1H & FOTO & FUP:
 {raw_verifikasi}
 
 HASIL AUDIT KONSISTENSI METODOLOGI PDCA (golden thread, terorganisir per fase — lihat peta pemakaian di atas):
@@ -712,71 +656,67 @@ TEMUAN ANALISIS KONFIRMATIF:
 
 Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifikasi harus spesifik, menyebutkan ISI dan ANGKA konkret dari dokumen serta hasil audit alur logika/verifikasi, minimal 1-2 kalimat menjelaskan MENGAPA skor itu diberikan — DILARANG hanya menyebut nomor halaman tanpa penjelasan isinya; WAJIB juga isi field perlu_validasi_manual dan alasan_validasi_manual sesuai aturan di atas):
 [{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik merujuk isi dokumen dan analisis koherensi, sebutkan angka/isi konkret", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}}]"""
-        raw_sintesis_skoring = panggil_ai_dengan_retry(
-            prompt_4,
-            "Sintesis Skoring Rubrik [6/8]",
-            status_box,
-            config=GENERATION_CONFIG_JSON,
-        )
-        hasil_sintesis_skoring_json = bersihkan_dan_parse_json(
-            raw_sintesis_skoring
-        )
+                raw_sintesis_skoring = panggil_ai_dengan_retry(
+                    prompt_4,
+                    "Sintesis Skoring Rubrik [6/8]",
+                    status_box,
+                    config=GENERATION_CONFIG_JSON,
+                )
+                hasil_sintesis_skoring_json = bersihkan_dan_parse_json(
+                    raw_sintesis_skoring
+                )
 
-        # --- 7. Analisis Dampak Operasional ---
-        daftar_kategori_str = ", ".join(KATEGORI_IMPACT_14)
-        prompt_5 = (
-            "Anda adalah Analis Dampak Operasional yang menilai dampak"
-            " operasional dari dokumen Kaizen ini secara objektif"
-            " berdasarkan bukti tertulis saja.\n\n"
-            "ATURAN MEMBACA TABEL IMPACT/MANFAAT: dokumen Kaizen sering"
-            " memuat tabel dengan format 'kategori impact | ambang batas"
-            " skor rendah | ambang batas skor tinggi | penjelasan'. Dua"
-            " kolom di tengah (misal 'Mengurangi ≤ 1%' vs 'Mengurangi"
-            " >5%') adalah AMBANG BATAS/SKALA PENILAIAN GENERIK yang"
-            " SELALU muncul di semua baris kategori terlepas dari"
-            " relevansinya dengan proyek ini — ini BUKAN bukti pencapaian"
-            " aktual. Kolom 'PENJELASAN'/'keterangan' di ujung kanan tabel"
-            " adalah SATU-SATUNYA kolom yang berisi pencapaian AKTUAL"
-            " proyek ini. Kalau kolom penjelasan untuk suatu kategori"
-            " KOSONG SEPENUHNYA (tidak ada satu kalimat pun), kategori itu"
-            " TIDAK diukur/tidak terdampak oleh proyek ini — JANGAN"
-            " mengarang atau menyimpulkan pencapaian dari angka ambang"
-            " batas skala pada kolom tengah.\n\n"
-            f"Evaluasi {len(KATEGORI_IMPACT_14)} kategori impact berikut:"
-            f" {daftar_kategori_str}.\n"
-            "Untuk setiap kategori, status HARUS salah satu dari: 'IYA'"
-            " (ada dampak terbukti dengan KETERANGAN/PENJELASAN AKTUAL"
-            " yang jelas di dokumen — bukan sekadar ambang batas skala"
-            " penilaian), 'TIDAK' (tidak ada dampak/tidak disebutkan sama"
-            " sekali, ATAU kolom penjelasan/keterangan untuk kategori itu"
-            " kosong), atau 'TIDAK YAKIN' (ADA keterangan/penjelasan tapi"
-            " tidak lengkap/ambigu/tidak cukup data pendukung).\n\n"
-            "SELAIN itu, tentukan juga jenis saving berdasarkan dokumen:"
-            " apakah termasuk 'Hard Saving' (saving real >100 juta rupiah,"
-            " terkait penurunan pemakaian gas/listrik/air/uji riksa/"
-            " pembelian material), 'Virtual Saving atau Cost Avoidance'"
-            " (saving tidak real, terkait material balance/stock akurasi/"
-            "customer complain), 'Keduanya', atau 'Tidak Ada' — tambahkan"
-            " sebagai satu entri terpisah dengan kategori bernilai"
-            " 'Jenis Saving'.\n\n"
-            "Keluarkan HANYA JSON array valid dengan skema persis:\n"
-            '[{"kategori": "Air", "status": "TIDAK", "keterangan":'
-            ' "alasan singkat merujuk dokumen"}]'
-        )
-        raw_analisis_dampak = panggil_ai_dengan_retry(
-            [gemini_file, prompt_5],
-            "Analisis Dampak Operasional [7/8]",
-            status_box,
-            config=GENERATION_CONFIG_JSON,
-        )
-        hasil_saving_json = bersihkan_dan_parse_json(raw_analisis_dampak)
+                # --- 7. Analisis Dampak Operasional ---
+                daftar_kategori_str = ", ".join(KATEGORI_IMPACT_14)
+                prompt_5 = (
+                    "Anda adalah Analis Dampak Operasional yang menilai dampak"
+                    " operasional dari dokumen Kaizen ini secara objektif"
+                    " berdasarkan bukti tertulis saja.\n\n"
+                    "ATURAN MEMBACA TABEL IMPACT/MANFAAT: dokumen Kaizen sering"
+                    " memuat tabel dengan format 'kategori impact | ambang batas"
+                    " skor rendah | ambang batas skor tinggi | penjelasan'. Dua"
+                    " kolom di tengah (misal 'Mengurangi ≤ 1%' vs 'Mengurangi"
+                    " >5%') adalah AMBANG BATAS/SKALA PENILAIAN GENERIK yang"
+                    " SELALU muncul di semua baris kategori terlepas dari"
+                    " relevansinya dengan proyek ini — ini BUKAN bukti pencapaian"
+                    " aktual. Kolom 'PENJELASAN'/'keterangan' di ujung kanan tabel"
+                    " adalah SATU-SATUNYA kolom yang berisi pencapaian AKTUAL"
+                    " proyek ini. Kalau kolom penjelasan untuk suatu kategori"
+                    " KOSONG SEPENUHNYA (tidak ada satu kalimat pun), kategori itu"
+                    " TIDAK diukur/tidak terdampak oleh proyek ini — JANGAN"
+                    " mengarang atau menyimpulkan pencapaian dari angka ambang"
+                    " batas skala pada kolom tengah.\n\n"
+                    f"Evaluasi {len(KATEGORI_IMPACT_14)} kategori impact berikut:"
+                    f" {daftar_kategori_str}.\n"
+                    "Untuk setiap kategori, status HARUS salah satu dari: 'IYA'"
+                    " (ada dampak terbukti dengan KETERANGAN/PENJELASAN AKTUAL"
+                    " yang jelas di dokumen — bukan sekadar ambang batas skala"
+                    " penilaian), 'TIDAK' (tidak ada dampak/tidak disebutkan sama"
+                    " sekali, ATAU kolom penjelasan/keterangan untuk kategori itu"
+                    " kosong), atau 'TIDAK YAKIN' (ADA keterangan/penjelasan tapi"
+                    " tidak lengkap/ambigu/tidak cukup data pendukung).\n\n"
+                    "SELAIN itu, tentukan juga 'Jenis Saving' berdasarkan dokumen. "
+                    "Pilihan statusnya adalah: 'Hard Saving' (saving finansial nyata >100 juta rupiah/tahun, "
+                    "terkait penurunan pemakaian gas/listrik/air/pembelian material/manpower), "
+                    "'Virtual/Soft Saving' (saving tidak real, berupa opportunity loss yang dihindari, cost avoidance, material balance/stock akurasi, "
+                    "atau penurunan customer complaint), 'Keduanya', atau 'Tidak Ada'. "
+                    "PENTING: Pada kolom 'keterangan' untuk 'Jenis Saving', WAJIB JELASKAN ALASAN MENGAPA "
+                    "Anda mengkategorikannya sebagai Hard/Soft Saving (misal: 'Dikategorikan Keduanya karena terdapat penurunan pemakaian listrik senilai Rp 150jt (Hard) dan penurunan defect (Soft)'). "
+                    "JANGAN KOSONGKAN keterangan untuk Jenis Saving.\n\n"
+                    "Keluarkan HANYA JSON array valid dengan skema persis:\n"
+                    '[{"kategori": "Air", "status": "TIDAK", "keterangan":'
+                    ' "alasan singkat merujuk dokumen"}]'
+                )
+                raw_analisis_dampak = panggil_ai_dengan_retry(
+                    [gemini_file, prompt_5],
+                    "Analisis Dampak Operasional [7/8]",
+                    status_box,
+                    config=GENERATION_CONFIG_JSON,
+                )
+                hasil_saving_json = bersihkan_dan_parse_json(raw_analisis_dampak)
 
-        # --- 8. Umpan Balik Peserta ---
-        # Modul ini beda audiens dari modul lain: outputnya untuk PESERTA,
-        # bukan juri, jadi bahasanya harus membangun dan mudah dicerna.
-        # Kategori DIBUAT TETAP supaya konsisten & bisa dibandingkan antar
-        # ~40 peserta, plus 1 kategori terbuka untuk temuan unik di luar itu.
-        prompt_feedback = f"""Anda berperan sebagai narasumber pembinaan (coaching) Kaizen yang memberikan umpan balik konstruktif untuk PESERTA kompetisi (bukan untuk juri). Bahasa harus suportif, jelas, mudah dicerna oleh peserta yang levelnya beragam (sebagian belum paham PDCA dengan baik) — kritik boleh tegas dan jujur, tapi disampaikan dengan cara yang mendidik dan tidak menjatuhkan semangat.
+                # --- 8. Umpan Balik Peserta ---
+                prompt_feedback = f"""Anda berperan sebagai narasumber pembinaan (coaching) Kaizen yang memberikan umpan balik konstruktif untuk PESERTA kompetisi (bukan untuk juri). Bahasa harus suportif, jelas, mudah dicerna oleh peserta yang levelnya beragam (sebagian belum paham PDCA dengan baik) — kritik boleh tegas dan jujur, tapi disampaikan dengan cara yang mendidik dan tidak menjatuhkan semangat.
 
 Untuk MASING-MASING 6 kategori tetap di bawah, isi 3 kolom: "kekuatan" (apa yang sudah bagus, sebutkan konkret — kalau memang tidak ada yang menonjol, boleh tulis "Belum ada yang menonjol di bagian ini"), "area_perbaikan" (apa yang paling perlu ditingkatkan, jelaskan KENAPA), dan "saran_konkret" (langkah nyata dan actionable yang bisa dilakukan peserta, bukan saran generik).
 
@@ -784,9 +724,9 @@ Untuk MASING-MASING 6 kategori tetap di bawah, isi 3 kolom: "kekuatan" (apa yang
 1. "Struktur & Kejelasan Penulisan" — organisasi paper, ada tidaknya typo/salah ketik yang mengganggu, konsistensi format/penomoran, kejelasan bahasa (rujuk temuan kualitas penulisan dari hasil ekstraksi bila ada; JANGAN mengangkat tanggal berlaku template dokumen kontrol sebagai contoh kesalahan penulisan).
 2. "Perumusan Problem Statement" — apakah masalah dirumuskan dengan jelas, spesifik, dan didukung data (bukan cuma opini/dugaan).
 3. "Kesesuaian Goal/Target dengan Objective Awal" — apakah target yang ditetapkan di awal benar-benar terjawab oleh hasil akhir, dan apakah target itu sendiri masuk akal/berdasar data.
-4. "Kedalaman Analisis Akar Masalah" — kualitas fishbone dan why-why analysis: apakah benar-benar sampai ke akar masalah atau berhenti di gejala permukaan.
+4. "Kedalaman Analisis Akar Masalah" — kualitas fishbone dan why-why analysis: apakah benar-benar sampai ke akar masalah teknis, atau masih berupa tebakan/potensi tanpa uji coba (rujuk evaluasi kriteria 10/P7).
 5. "Kekuatan Bukti & Data Pendukung" — apakah klaim-klaim (masalah, hasil, saving) didukung data/foto yang jelas dan measurement yang konkret, atau banyak yang cuma klaim tanpa bukti.
-6. "Standardisasi & Keberlanjutan" — apakah perbaikan ini benar-benar dikunci supaya tidak terulang (SOP/standar) dan punya potensi direplikasi.
+6. "Standardisasi & Keberlanjutan" — apakah perbaikan ini benar-benar dikunci supaya tidak terulang (SOP/standar) dan kelengkapan dokumen FUP (rujuk jika peserta gagal melampirkan FUP resmi).
 
 Setelah 6 kategori tetap itu, BOLEH tambahkan 0-2 baris tambahan dengan kategori "Catatan Tambahan" untuk temuan penting lain yang tidak masuk 6 kategori di atas (kalau memang ada yang signifikan; kalau tidak ada, tidak usah dipaksakan).
 
@@ -794,7 +734,7 @@ BAHAN PERTIMBANGAN (gunakan semua sumber ini untuk menyusun feedback yang akurat
 FAKTA HASIL EKSTRAKSI (termasuk catatan kualitas penulisan):
 {laporan_ekstraksi}
 
-HASIL VERIFIKASI KELAYAKAN, 5W1H & FOTO:
+HASIL VERIFIKASI KELAYAKAN, 5W1H & FOTO & FUP:
 {raw_verifikasi}
 
 HASIL AUDIT KONSISTENSI METODOLOGI PDCA:
@@ -808,394 +748,390 @@ TEMUAN ANALISIS KRITIS:
 
 Keluarkan HANYA JSON array valid dengan skema persis:
 [{{"kategori": "Struktur & Kejelasan Penulisan", "kekuatan": "...", "area_perbaikan": "...", "saran_konkret": "..."}}]"""
-        raw_feedback = panggil_ai_dengan_retry(
-            prompt_feedback,
-            "Umpan Balik Peserta [8/8]",
-            status_box,
-            config=GENERATION_CONFIG_JSON,
-        )
-        hasil_feedback_json = bersihkan_dan_parse_json(raw_feedback)
+                raw_feedback = panggil_ai_dengan_retry(
+                    prompt_feedback,
+                    "Umpan Balik Peserta [8/8]",
+                    status_box,
+                    config=GENERATION_CONFIG_JSON,
+                )
+                hasil_feedback_json = bersihkan_dan_parse_json(raw_feedback)
 
-        ada_yang_gagal = not all([
-            laporan_ekstraksi,
-            raw_verifikasi,
-            raw_alur_logika,
-            temuan_analisis_kritis,
-            temuan_analisis_konfirmatif,
-            raw_sintesis_skoring,
-            raw_analisis_dampak,
-            raw_feedback,
-        ])
-        status_box.update(
-            label=(
-                "⚠️ Selesai dengan beberapa agen gagal — lihat detail di"
-                " bawah"
-                if ada_yang_gagal
-                else "✅ Analisis Selesai!"
-            ),
-            state="complete" if not ada_yang_gagal else "error",
-            expanded=ada_yang_gagal,
-        )
+                ada_yang_gagal = not all([
+                    laporan_ekstraksi,
+                    raw_verifikasi,
+                    raw_alur_logika,
+                    temuan_analisis_kritis,
+                    temuan_analisis_konfirmatif,
+                    raw_sintesis_skoring,
+                    raw_analisis_dampak,
+                    raw_feedback,
+                ])
+                status_box.update(
+                    label=(
+                        "⚠️ Selesai dengan beberapa agen gagal — lihat detail di"
+                        " bawah"
+                        if ada_yang_gagal
+                        else "✅ Analisis Selesai!"
+                    ),
+                    state="complete" if not ada_yang_gagal else "error",
+                    expanded=ada_yang_gagal,
+                )
 
-        # --- PEMROSESAN DATA TABEL ---
-        if hasil_feedback_json:
-          df_f = pd.DataFrame(hasil_feedback_json)
-          df_f.columns = df_f.columns.str.lower().str.strip()
-          st.session_state.df_feedback = df_f
-        else:
-          st.session_state.df_feedback = pd.DataFrame(
-              columns=["kategori", "kekuatan", "area_perbaikan", "saran_konkret"]
-          )
+                # --- PEMROSESAN DATA TABEL ---
+                if hasil_feedback_json:
+                    df_f = pd.DataFrame(hasil_feedback_json)
+                    df_f.columns = df_f.columns.str.lower().str.strip()
+                    st.session_state.df_feedback = df_f
+                else:
+                    st.session_state.df_feedback = pd.DataFrame(
+                        columns=["kategori", "kekuatan", "area_perbaikan", "saran_konkret"]
+                    )
 
-        if hasil_verifikasi_json:
-          df_v = pd.DataFrame(hasil_verifikasi_json)
-          df_v.columns = df_v.columns.str.lower().str.strip()
-          st.session_state.df_verifikasi = df_v
-        else:
-          st.session_state.df_verifikasi = pd.DataFrame(
-              columns=["kategori", "item", "status", "catatan"]
-          )
+                if hasil_verifikasi_json:
+                    df_v = pd.DataFrame(hasil_verifikasi_json)
+                    df_v.columns = df_v.columns.str.lower().str.strip()
+                    st.session_state.df_verifikasi = df_v
+                else:
+                    st.session_state.df_verifikasi = pd.DataFrame(
+                        columns=["kategori", "item", "status", "catatan"]
+                    )
 
-        if hasil_alur_json:
-          df_a = pd.DataFrame(hasil_alur_json)
-          df_a.columns = df_a.columns.str.lower().str.strip()
-          st.session_state.df_alur_logika = df_a
-        else:
-          st.session_state.df_alur_logika = pd.DataFrame(
-              columns=["no", "tahap", "verdict", "temuan"]
-          )
+                if hasil_alur_json:
+                    df_a = pd.DataFrame(hasil_alur_json)
+                    df_a.columns = df_a.columns.str.lower().str.strip()
+                    st.session_state.df_alur_logika = df_a
+                else:
+                    st.session_state.df_alur_logika = pd.DataFrame(
+                        columns=["no", "tahap", "verdict", "temuan"]
+                    )
 
-        if hasil_sintesis_skoring_json:
-          total_skor_ai_awal = 0.0
-          for item in hasil_sintesis_skoring_json:
-            nomor_kriteria = item.get(
-                "no", item.get("No", item.get("nomor", 0))
-            )
-            try:
-              nomor_kriteria = int(nomor_kriteria)
-            except (TypeError, ValueError):
-              nomor_kriteria = 0
+                if hasil_sintesis_skoring_json:
+                    total_skor_ai_awal = 0.0
+                    for item in hasil_sintesis_skoring_json:
+                        nomor_kriteria = item.get(
+                            "no", item.get("No", item.get("nomor", 0))
+                        )
+                        try:
+                            nomor_kriteria = int(nomor_kriteria)
+                        except (TypeError, ValueError):
+                            nomor_kriteria = 0
 
-            skor_item = item.get("skor", item.get("score", None))
-            try:
-              total_skor_ai_awal += float(skor_item)
-            except (TypeError, ValueError):
-              pass
+                        skor_item = item.get("skor", item.get("score", None))
+                        try:
+                            total_skor_ai_awal += float(skor_item)
+                        except (TypeError, ValueError):
+                            pass
 
-            perlu_validasi, alasan_validasi = tentukan_validasi_manual(
-                item, nomor_kriteria
-            )
-            item["status validasi"] = (
-                "⚠️ VALIDASI MANUAL" if perlu_validasi else "OTOMATIS AI"
-            )
-            item["alasan_validasi_manual"] = (
-                alasan_validasi if perlu_validasi else ""
-            )
-            item["skor"] = skor_item
-            item["catatan_validator"] = ""
+                        perlu_validasi, alasan_validasi = tentukan_validasi_manual(
+                            item, nomor_kriteria
+                        )
+                        item["status validasi"] = (
+                            "⚠️ VALIDASI MANUAL" if perlu_validasi else "OTOMATIS AI"
+                        )
+                        item["alasan_validasi_manual"] = (
+                            alasan_validasi if perlu_validasi else ""
+                        )
+                        item["skor"] = skor_item
+                        item["catatan_validator"] = ""
 
-          st.session_state.total_skor_ai_awal = total_skor_ai_awal
+                    st.session_state.total_skor_ai_awal = total_skor_ai_awal
 
-          df_r = pd.DataFrame(hasil_sintesis_skoring_json)
-          df_r.columns = df_r.columns.str.lower().str.strip()
-          df_r.rename(
-              columns={
-                  "nomor": "no",
-                  "score": "skor",
-                  "nilai": "skor",
-                  "alasan": "justifikasi",
-                  "keterangan": "justifikasi",
-              },
-              inplace=True,
-          )
+                    df_r = pd.DataFrame(hasil_sintesis_skoring_json)
+                    df_r.columns = df_r.columns.str.lower().str.strip()
+                    df_r.rename(
+                        columns={
+                            "nomor": "no",
+                            "score": "skor",
+                            "nilai": "skor",
+                            "alasan": "justifikasi",
+                            "keterangan": "justifikasi",
+                        },
+                        inplace=True,
+                    )
 
-          kolom_urutan = [
-              "no",
-              "kriteria",
-              "status validasi",
-              "alasan_validasi_manual",
-              "skor",
-              "justifikasi",
-              "catatan_validator",
-          ]
-          cols = [c for c in kolom_urutan if c in df_r.columns]
-          sisa = [c for c in df_r.columns if c not in cols]
-          st.session_state.df_rubrik = df_r[cols + sisa]
-        else:
-          st.session_state.df_rubrik = pd.DataFrame(
-              columns=[
-                  "no",
-                  "kriteria",
-                  "status validasi",
-                  "alasan_validasi_manual",
-                  "skor",
-                  "justifikasi",
-                  "catatan_validator",
-              ]
-          )
-          st.session_state.total_skor_ai_awal = 0.0
+                    kolom_urutan = [
+                        "no",
+                        "kriteria",
+                        "status validasi",
+                        "alasan_validasi_manual",
+                        "skor",
+                        "justifikasi",
+                        "catatan_validator",
+                    ]
+                    cols = [c for c in kolom_urutan if c in df_r.columns]
+                    sisa = [c for c in df_r.columns if c not in cols]
+                    st.session_state.df_rubrik = df_r[cols + sisa]
+                else:
+                    st.session_state.df_rubrik = pd.DataFrame(
+                        columns=[
+                            "no",
+                            "kriteria",
+                            "status validasi",
+                            "alasan_validasi_manual",
+                            "skor",
+                            "justifikasi",
+                            "catatan_validator",
+                        ]
+                    )
+                    st.session_state.total_skor_ai_awal = 0.0
 
-        if hasil_saving_json:
-          df_s = pd.DataFrame(hasil_saving_json)
-          df_s.columns = df_s.columns.str.lower().str.strip()
-          st.session_state.df_saving = df_s
-        else:
-          st.session_state.df_saving = pd.DataFrame(
-              columns=["kategori", "status", "keterangan"]
-          )
+                if hasil_saving_json:
+                    df_s = pd.DataFrame(hasil_saving_json)
+                    df_s.columns = df_s.columns.str.lower().str.strip()
+                    st.session_state.df_saving = df_s
+                else:
+                    st.session_state.df_saving = pd.DataFrame(
+                        columns=["kategori", "status", "keterangan"]
+                    )
 
-        st.session_state.transkrip = [
-            {"Peran": "Modul Ekstraksi Bukti Dokumen", "Laporan": laporan_ekstraksi},
-            {
-                "Peran": "Modul Verifikasi Bukti Visual & Kelayakan",
-                "Laporan": raw_verifikasi,
-            },
-            {
-                "Peran": "Modul Audit Konsistensi Metodologi PDCA",
-                "Laporan": raw_alur_logika,
-            },
-            {
-                "Peran": "Modul Analisis Kritis (Tinjauan Independen)",
-                "Laporan": temuan_analisis_kritis,
-            },
-            {
-                "Peran": "Modul Analisis Konfirmatif (Tinjauan Pembanding)",
-                "Laporan": temuan_analisis_konfirmatif,
-            },
-            {
-                "Peran": "Modul Sintesis Skoring Rubrik",
-                "Laporan": raw_sintesis_skoring,
-            },
-            {
-                "Peran": "Modul Analisis Dampak Operasional",
-                "Laporan": raw_analisis_dampak,
-            },
-            {
-                "Peran": "Modul Umpan Balik Peserta",
-                "Laporan": raw_feedback,
-            },
-        ]
+                st.session_state.transkrip = [
+                    {"Peran": "Modul Ekstraksi Bukti Dokumen", "Laporan": laporan_ekstraksi},
+                    {
+                        "Peran": "Modul Verifikasi Bukti Visual & Kelayakan",
+                        "Laporan": raw_verifikasi,
+                    },
+                    {
+                        "Peran": "Modul Audit Konsistensi Metodologi PDCA",
+                        "Laporan": raw_alur_logika,
+                    },
+                    {
+                        "Peran": "Modul Analisis Kritis (Tinjauan Independen)",
+                        "Laporan": temuan_analisis_kritis,
+                    },
+                    {
+                        "Peran": "Modul Analisis Konfirmatif (Tinjauan Pembanding)",
+                        "Laporan": temuan_analisis_konfirmatif,
+                    },
+                    {
+                        "Peran": "Modul Sintesis Skoring Rubrik",
+                        "Laporan": raw_sintesis_skoring,
+                    },
+                    {
+                        "Peran": "Modul Analisis Dampak Operasional",
+                        "Laporan": raw_analisis_dampak,
+                    },
+                    {
+                        "Peran": "Modul Umpan Balik Peserta",
+                        "Laporan": raw_feedback,
+                    },
+                ]
 
-        st.session_state.proses_selesai = True
-        st.rerun()
+                st.session_state.proses_selesai = True
+                st.rerun()
 
-      except Exception as e:
-        status_box.update(label="❌ Terjadi Kesalahan", state="error")
-        st.error(f"**Pesan Error:** `{e}`")
-        with st.expander("🔍 Detail teknis (traceback lengkap)"):
-          st.code(traceback.format_exc())
-      finally:
-        if temp_path and os.path.exists(temp_path):
-          try:
-            os.remove(temp_path)
-          except OSError:
-            pass
-        if gemini_file is not None:
-          try:
-            client.files.delete(name=gemini_file.name)
-          except Exception:
-            pass
+            except Exception as e:
+                status_box.update(label="❌ Terjadi Kesalahan", state="error")
+                st.error(f"**Pesan Error:** `{e}`")
+                with st.expander("🔍 Detail teknis (traceback lengkap)"):
+                    st.code(traceback.format_exc())
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+                if gemini_file is not None:
+                    try:
+                        client.files.delete(name=gemini_file.name)
+                    except Exception:
+                        pass
 
 # ==========================================
 # 5. HASIL PENILAIAN & UNDUH EXCEL
 # ==========================================
 if st.session_state.proses_selesai:
-  st.success(
-      "Analisis AI selesai! Silakan periksa dan validasi tabel di bawah —"
-      " poin bertanda ⚠️ WAJIB divalidasi manual sebelum diunduh."
-  )
-
-  # Peringatan permanen jika ada agen yang gagal menghasilkan jawaban,
-  # supaya tidak perlu bongkar transkrip / log status untuk tahu masalahnya.
-  agen_kosong = [
-      entri["Peran"]
-      for entri in st.session_state.transkrip
-      if not str(entri.get("Laporan", "")).strip()
-  ]
-  if agen_kosong:
-    st.warning(
-        "⚠️ Modul berikut TIDAK menghasilkan jawaban (kemungkinan diblokir"
-        " safety filter, kehabisan kuota, atau macet di proses berpikir"
-        " model):\n\n"
-        + "\n".join(f"- {nama}" for nama in agen_kosong)
-        + "\n\nTabel di bawah mungkin kosong/tidak lengkap akibat ini."
-        " Coba jalankan ulang, atau cek log saat proses berjalan untuk"
-        " detail `finish_reason`."
+    st.success(
+        "Analisis AI selesai! Silakan periksa dan validasi tabel di bawah —"
+        " poin bertanda ⚠️ WAJIB divalidasi manual sebelum diunduh."
     )
 
-  # Ambil verdict gate check untuk ditampilkan sebagai banner besar paling
-  # atas, supaya juri bisa triase cepat: layak dinilai detail atau tidak.
-  verdict_gate = None
-  alasan_gate = ""
-  if not st.session_state.df_verifikasi.empty:
-    baris_gate = st.session_state.df_verifikasi[
-        st.session_state.df_verifikasi.get("kategori", pd.Series(dtype=str))
-        .astype(str)
-        .str.upper()
-        == "GATE CHECK"
+    agen_kosong = [
+        entri["Peran"]
+        for entri in st.session_state.transkrip
+        if not str(entri.get("Laporan", "")).strip()
     ]
-    if not baris_gate.empty:
-      verdict_gate = str(baris_gate.iloc[0].get("status", "")).upper()
-      alasan_gate = str(baris_gate.iloc[0].get("catatan", ""))
+    if agen_kosong:
+        st.warning(
+            "⚠️ Modul berikut TIDAK menghasilkan jawaban (kemungkinan diblokir"
+            " safety filter, kehabisan kuota, atau macet di proses berpikir"
+            " model):\n\n"
+            + "\n".join(f"- {nama}" for nama in agen_kosong)
+            + "\n\nTabel di bawah mungkin kosong/tidak lengkap akibat ini."
+            " Coba jalankan ulang, atau cek log saat proses berjalan untuk"
+            " detail `finish_reason`."
+        )
 
-  if verdict_gate == "TIDAK LAYAK":
-    st.error(
-        f"🚫 **GATE CHECK: TIDAK LAYAK sebagai proyek improvement.**"
-        f" {alasan_gate}\n\nTinjau ulang apakah submission ini memang"
-        " layak dinilai sebagai Kaizen, sebelum melanjutkan ke skor"
-        " detail di bawah."
+    verdict_gate = None
+    alasan_gate = ""
+    if not st.session_state.df_verifikasi.empty:
+        baris_gate = st.session_state.df_verifikasi[
+            st.session_state.df_verifikasi.get("kategori", pd.Series(dtype=str))
+            .astype(str)
+            .str.upper()
+            == "GATE CHECK"
+        ]
+        if not baris_gate.empty:
+            verdict_gate = str(baris_gate.iloc[0].get("status", "")).upper()
+            alasan_gate = str(baris_gate.iloc[0].get("catatan", ""))
+
+    if verdict_gate == "TIDAK LAYAK":
+        st.error(
+            f"🚫 **GATE CHECK: TIDAK LAYAK sebagai proyek improvement.**"
+            f" {alasan_gate}\n\nTinjau ulang apakah submission ini memang"
+            " layak dinilai sebagai Kaizen, sebelum melanjutkan ke skor"
+            " detail di bawah."
+        )
+    elif verdict_gate == "PERLU PERHATIAN":
+        st.warning(
+            f"⚠️ **GATE CHECK: PERLU PERHATIAN.** {alasan_gate}\n\nBukan"
+            " berarti otomatis gugur, tapi juri disarankan meninjau langsung"
+            " bagian ini sebelum finalisasi skor."
+        )
+    elif verdict_gate == "LAYAK":
+        st.success(f"✅ **GATE CHECK: LAYAK sebagai proyek improvement.** {alasan_gate}")
+
+    st.subheader("🔍 1. Verifikasi Kelayakan, Kebenaran 5W1H & Bukti Foto")
+    st.caption(
+        "Hasil dari modul yang membaca LANGSUNG file PDF (termasuk foto/"
+        "gambar di dalamnya) — bukan cuma ringkasan teks. Kolom **status**"
+        " 'TERTUKAR/TIDAK SESUAI' atau 'MERAGUKAN' berarti ada isi yang"
+        " keliru ditempatkan atau foto yang tidak benar-benar mendukung"
+        " klaim di sekitarnya."
     )
-  elif verdict_gate == "PERLU PERHATIAN":
-    st.warning(
-        f"⚠️ **GATE CHECK: PERLU PERHATIAN.** {alasan_gate}\n\nBukan"
-        " berarti otomatis gugur, tapi juri disarankan meninjau langsung"
-        " bagian ini sebelum finalisasi skor."
+    edited_verifikasi = st.data_editor(
+        st.session_state.df_verifikasi,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="tabel_verifikasi",
     )
-  elif verdict_gate == "LAYAK":
-    st.success(f"✅ **GATE CHECK: LAYAK sebagai proyek improvement.** {alasan_gate}")
 
-  st.subheader("🔍 1. Verifikasi Kelayakan, Kebenaran 5W1H & Bukti Foto")
-  st.caption(
-      "Hasil dari modul yang membaca LANGSUNG file PDF (termasuk foto/"
-      "gambar di dalamnya) — bukan cuma ringkasan teks. Kolom **status**"
-      " 'TERTUKAR/TIDAK SESUAI' atau 'MERAGUKAN' berarti ada isi yang"
-      " keliru ditempatkan atau foto yang tidak benar-benar mendukung"
-      " klaim di sekitarnya."
-  )
-  edited_verifikasi = st.data_editor(
-      st.session_state.df_verifikasi,
-      num_rows="dynamic",
-      use_container_width=True,
-      key="tabel_verifikasi",
-  )
-
-  st.subheader("🔗 2. Audit Konsistensi Metodologi PDCA (Golden Thread)")
-  st.caption(
-      "Menelusuri apakah tiap tahap (5W1H → Problem Statement → Kepala"
-      " Ikan → Kategori 4M → Rantai Why-Why → Root Cause → Action Plan →"
-      " Standardisasi → Target vs Hasil) benar-benar tersambung logis,"
-      " bukan cuma sama-sama ada. **LEMAH/TIDAK KONSISTEN** di sini jadi"
-      " dasar penurunan skor kriteria 6, 7, 8, 10, dan 16 di tabel rubrik"
-      " bawah."
-  )
-  edited_alur = st.data_editor(
-      st.session_state.df_alur_logika,
-      num_rows="dynamic",
-      use_container_width=True,
-      key="tabel_alur_logika",
-  )
-
-  st.subheader("📝 3. Tabel Validasi Rubrik (21 Poin)")
-  st.caption(
-      "Kolom **status validasi** kini ditentukan secara DINAMIS oleh AI"
-      " berdasarkan tingkat keyakinannya terhadap bukti pada dokumen ini"
-      " dan kebutuhan verifikasi kondisi lapangan aktual — bukan lagi"
-      " daftar tetap yang sama untuk semua submission. Lihat kolom"
-      " **alasan_validasi_manual** untuk memahami alasan spesifiknya."
-      " Kolom **skor** dapat diedit langsung sebagai skor final; skor"
-      " asli dari AI tetap tersimpan sebagai jejak audit pada sheet"
-      " 'Transkrip AI' di file unduhan."
-  )
-  edited_rubrik = st.data_editor(
-      st.session_state.df_rubrik,
-      num_rows="dynamic",
-      use_container_width=True,
-      key="tabel_rubrik",
-      column_config={
-          "no": st.column_config.NumberColumn(disabled=True),
-          "kriteria": st.column_config.TextColumn(disabled=True),
-          "status validasi": st.column_config.TextColumn(disabled=True),
-          "alasan_validasi_manual": st.column_config.TextColumn(
-              disabled=True
-          ),
-      },
-  )
-
-  total_saat_ini = pd.to_numeric(
-      edited_rubrik.get("skor"), errors="coerce"
-  ).sum()
-  col_a, col_b = st.columns(2)
-  col_a.metric(
-      "Total Skor AI (Awal)", f"{st.session_state.total_skor_ai_awal:.0f}"
-  )
-  col_b.metric("Total Skor Saat Ini (Setelah Validasi)", f"{total_saat_ini:.0f}")
-
-  st.subheader("💰 4. Tabel Validasi Impact & Saving (14 Kategori)")
-  edited_saving = st.data_editor(
-      st.session_state.df_saving,
-      num_rows="dynamic",
-      use_container_width=True,
-      key="tabel_saving",
-  )
-
-  st.subheader("💬 5. Feedback & Saran untuk Peserta")
-  st.caption(
-      "Bahasa di tabel ini sengaja dibuat untuk PESERTA (bukan juri) —"
-      " membangun dan actionable. Ini yang bisa langsung kamu teruskan"
-      " ke peserta setelah kompetisi."
-  )
-  edited_feedback = st.data_editor(
-      st.session_state.df_feedback,
-      num_rows="dynamic",
-      use_container_width=True,
-      key="tabel_feedback",
-  )
-
-  with st.expander("📜 Lihat Transkrip Lengkap Multi-Agent"):
-    for entri in st.session_state.transkrip:
-      st.markdown(f"**{entri['Peran']}**")
-      st.text(entri["Laporan"])
-      st.divider()
-
-  output = io.BytesIO()
-  with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-    if not edited_verifikasi.empty:
-      edited_verifikasi.to_excel(
-          writer, sheet_name="Verifikasi 5W1H & Foto", index=False
-      )
-    if not edited_alur.empty:
-      edited_alur.to_excel(
-          writer, sheet_name="Audit Alur Logika", index=False
-      )
-    if not edited_rubrik.empty:
-      edited_rubrik.to_excel(
-          writer, sheet_name="Hasil Penilaian Rubrik", index=False
-      )
-    if not edited_saving.empty:
-      edited_saving.to_excel(
-          writer, sheet_name="Hasil Validasi Saving", index=False
-      )
-    if not edited_feedback.empty:
-      edited_feedback.to_excel(
-          writer, sheet_name="Feedback Peserta", index=False
-      )
-    if st.session_state.transkrip:
-      pd.DataFrame(st.session_state.transkrip).to_excel(
-          writer, sheet_name="Transkrip AI", index=False
-      )
-
-  excel_data = output.getvalue()
-
-  col1, col2 = st.columns(2)
-  with col1:
-    st.download_button(
-        label="📥 Unduh Laporan Lengkap (Excel 6 Sheet)",
-        data=excel_data,
-        file_name=f"Laporan_Kaizen_{st.session_state.nama_file}.xlsx",
-        mime=(
-            "application/vnd.openxmlformats-officedocument"
-            ".spreadsheetml.sheet"
-        ),
+    st.subheader("🔗 2. Audit Konsistensi Metodologi PDCA (Golden Thread)")
+    st.caption(
+        "Menelusuri apakah tiap tahap (5W1H → Problem Statement → Kepala"
+        " Ikan → Kategori 4M → Rantai Why-Why → Root Cause → Action Plan →"
+        " Standardisasi → Target vs Hasil) benar-benar tersambung logis,"
+        " bukan cuma sama-sama ada. **LEMAH/TIDAK KONSISTEN** di sini jadi"
+        " dasar penurunan skor kriteria 6, 7, 8, 10, dan 16 di tabel rubrik"
+        " bawah."
     )
-  with col2:
-    if st.button("🔄 Unggah Dokumen Baru (Reset)"):
-      st.session_state.proses_selesai = False
-      st.session_state.df_verifikasi = pd.DataFrame()
-      st.session_state.df_alur_logika = pd.DataFrame()
-      st.session_state.df_rubrik = pd.DataFrame()
-      st.session_state.df_saving = pd.DataFrame()
-      st.session_state.df_feedback = pd.DataFrame()
-      st.session_state.transkrip = []
-      st.session_state.nama_file = "Dokumen_Kaizen"
-      st.session_state.total_skor_ai_awal = 0.0
-      st.rerun()
+    edited_alur = st.data_editor(
+        st.session_state.df_alur_logika,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="tabel_alur_logika",
+    )
+
+    st.subheader("📝 3. Tabel Validasi Rubrik (21 Poin)")
+    st.caption(
+        "Kolom **status validasi** kini ditentukan secara DINAMIS oleh AI"
+        " berdasarkan tingkat keyakinannya terhadap bukti pada dokumen ini"
+        " dan kebutuhan verifikasi kondisi lapangan aktual — bukan lagi"
+        " daftar tetap yang sama untuk semua submission. Lihat kolom"
+        " **alasan_validasi_manual** untuk memahami alasan spesifiknya."
+        " Kolom **skor** dapat diedit langsung sebagai skor final; skor"
+        " asli dari AI tetap tersimpan sebagai jejak audit pada sheet"
+        " 'Transkrip AI' di file unduhan."
+    )
+    edited_rubrik = st.data_editor(
+        st.session_state.df_rubrik,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="tabel_rubrik",
+        column_config={
+            "no": st.column_config.NumberColumn(disabled=True),
+            "kriteria": st.column_config.TextColumn(disabled=True),
+            "status validasi": st.column_config.TextColumn(disabled=True),
+            "alasan_validasi_manual": st.column_config.TextColumn(
+                disabled=True
+            ),
+        },
+    )
+
+    total_saat_ini = pd.to_numeric(
+        edited_rubrik.get("skor"), errors="coerce"
+    ).sum()
+    col_a, col_b = st.columns(2)
+    col_a.metric(
+        "Total Skor AI (Awal)", f"{st.session_state.total_skor_ai_awal:.0f}"
+    )
+    col_b.metric("Total Skor Saat Ini (Setelah Validasi)", f"{total_saat_ini:.0f}")
+
+    st.subheader("💰 4. Tabel Validasi Impact & Saving (14 Kategori)")
+    edited_saving = st.data_editor(
+        st.session_state.df_saving,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="tabel_saving",
+    )
+
+    st.subheader("💬 5. Feedback & Saran untuk Peserta")
+    st.caption(
+        "Bahasa di tabel ini sengaja dibuat untuk PESERTA (bukan juri) —"
+        " membangun dan actionable. Ini yang bisa langsung kamu teruskan"
+        " ke peserta setelah kompetisi."
+    )
+    edited_feedback = st.data_editor(
+        st.session_state.df_feedback,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="tabel_feedback",
+    )
+
+    with st.expander("📜 Lihat Transkrip Lengkap Multi-Agent"):
+        for entri in st.session_state.transkrip:
+            st.markdown(f"**{entri['Peran']}**")
+            st.text(entri["Laporan"])
+            st.divider()
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        if not edited_verifikasi.empty:
+            edited_verifikasi.to_excel(
+                writer, sheet_name="Verifikasi 5W1H & Foto", index=False
+            )
+        if not edited_alur.empty:
+            edited_alur.to_excel(
+                writer, sheet_name="Audit Alur Logika", index=False
+            )
+        if not edited_rubrik.empty:
+            edited_rubrik.to_excel(
+                writer, sheet_name="Hasil Penilaian Rubrik", index=False
+            )
+        if not edited_saving.empty:
+            edited_saving.to_excel(
+                writer, sheet_name="Hasil Validasi Saving", index=False
+            )
+        if not edited_feedback.empty:
+            edited_feedback.to_excel(
+                writer, sheet_name="Feedback Peserta", index=False
+            )
+        if st.session_state.transkrip:
+            pd.DataFrame(st.session_state.transkrip).to_excel(
+                writer, sheet_name="Transkrip AI", index=False
+            )
+
+    excel_data = output.getvalue()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            label="📥 Unduh Laporan Lengkap (Excel 6 Sheet)",
+            data=excel_data,
+            file_name=f"Laporan_Kaizen_{st.session_state.nama_file}.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument"
+                ".spreadsheetml.sheet"
+            ),
+        )
+    with col2:
+        if st.button("🔄 Unggah Dokumen Baru (Reset)"):
+            st.session_state.proses_selesai = False
+            st.session_state.df_verifikasi = pd.DataFrame()
+            st.session_state.df_alur_logika = pd.DataFrame()
+            st.session_state.df_rubrik = pd.DataFrame()
+            st.session_state.df_saving = pd.DataFrame()
+            st.session_state.df_feedback = pd.DataFrame()
+            st.session_state.transkrip = []
+            st.session_state.nama_file = "Dokumen_Kaizen"
+            st.session_state.total_skor_ai_awal = 0.0
+            st.rerun()
