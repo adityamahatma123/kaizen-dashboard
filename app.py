@@ -5,11 +5,12 @@ import re
 import tempfile
 import time
 import traceback
+import base64
 
 import pandas as pd
 import streamlit as st
-from google import genai
-from google.genai import types
+from openai import OpenAI
+import fitz  # PyMuPDF untuk konversi PDF ke Gambar (Vision)
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN & TEMA (UI/UX)
@@ -74,26 +75,17 @@ st.markdown(
 )
 st.divider()
 
-# Inisialisasi API Key dari Secrets
+# Inisialisasi API Key OpenAI dari Secrets
 try:
-    API_KEY = st.secrets["GEMINI_API_KEY"].strip()
-    client = genai.Client(api_key=API_KEY)
+    API_KEY = st.secrets["OPENAI_API_KEY"].strip()
+    client = OpenAI(api_key=API_KEY)
 except Exception as e:
     st.error(f"Gagal memuat API Key dari Secrets. Detail: {e}")
     st.stop()
 
-MODEL_ID = "gemini-3.5-flash-lite"
-
-GENERATION_CONFIG_TEXT = types.GenerateContentConfig(
-    seed=42,
-    thinking_config=types.ThinkingConfig(thinking_level="medium"),
-)
-
-GENERATION_CONFIG_JSON = types.GenerateContentConfig(
-    seed=42,
-    thinking_config=types.ThinkingConfig(thinking_level="medium"),
-    response_mime_type="application/json",
-)
+# Gunakan gpt-4o-mini (cerdas, cepat, dan lebih murah seperti Gemini Flash)
+# Jika ingin lebih pintar lagi tapi lebih mahal, ganti jadi "gpt-4o"
+MODEL_ID = "gpt-4o-mini"
 
 KRITERIA_RUJUKAN_VALIDASI_MANUAL = {
     7: "Pemetaan 4M — verifikasi kesesuaian dengan kondisi mesin/area aktual di lapangan",
@@ -189,85 +181,95 @@ if "total_skor_ai_awal" not in st.session_state:
     st.session_state.total_skor_ai_awal = 0.0
 
 # ==========================================
-# 3. FUNGSI MESIN AI & PARSER (ANTI-ERROR)
+# 3. FUNGSI MESIN AI (OPENAI) & PARSER
 # ==========================================
+def ekstrak_gambar_pdf(file_path):
+    """Mengubah halaman PDF menjadi base64 images agar bisa 'dilihat' ChatGPT."""
+    try:
+        doc = fitz.open(file_path)
+        base64_images = []
+        for page in doc:
+            # Resolusi menengah agar token tidak bengkak
+            pix = page.get_pixmap(dpi=150)
+            img_byte_arr = pix.tobytes("jpeg")
+            base64_encoded = base64.b64encode(img_byte_arr).decode('utf-8')
+            base64_images.append(base64_encoded)
+        return base64_images
+    except Exception as e:
+        st.error(f"Gagal mengonversi PDF ke gambar: {e}")
+        return []
+
 def panggil_ai_dengan_retry(
-    contents,
+    prompt_text,
     deskripsi_agen,
     log_ui,
-    config=None,
+    pdf_images=None, # List of base64 images jika perlu melihat file
+    is_json=False,
     maksimal_percobaan=3,
 ):
-    config = config or GENERATION_CONFIG_TEXT
+    # Setup Content untuk ChatGPT
+    content_list = [{"type": "text", "text": prompt_text}]
+    
+    # Jika PDF diberikan, lampirkan sebagai gambar untuk dianalisis
+    if pdf_images:
+        for img_b64 in pdf_images:
+            content_list.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+            })
+
+    messages = [{"role": "user", "content": content_list}]
+
     for percobaan in range(maksimal_percobaan):
         try:
             log_ui.write(f"⏳ **{deskripsi_agen}:** Sedang menganalisis...")
-            response = client.models.generate_content(
-                model=MODEL_ID, contents=contents, config=config
-            )
-            teks_hasil = response.text if response and response.text else ""
+            
+            kwargs = {
+                "model": MODEL_ID,
+                "messages": messages,
+                "temperature": 0.2, # Menjaga jawaban tetap logis & konsisten
+            }
+            
+            # Khusus untuk output JSON
+            if is_json:
+                kwargs["response_format"] = {"type": "json_object"}
+
+            response = client.chat.completions.create(**kwargs)
+            teks_hasil = response.choices[0].message.content
+            
             if not teks_hasil:
-                finish_reason = None
-                try:
-                    finish_reason = response.candidates[0].finish_reason
-                except Exception:
-                    pass
-                log_ui.write(
-                    f"❗ **{deskripsi_agen}:** Jawaban KOSONG dari model"
-                    f" (finish_reason: {finish_reason}). Mencoba ulang..."
-                )
-                if percobaan == maksimal_percobaan - 1:
-                    log_ui.write(
-                        f"❌ **{deskripsi_agen}:** Tetap kosong setelah"
-                        f" {maksimal_percobaan}x percobaan."
-                    )
-                    return ""
-                time.sleep(8)
+                log_ui.write(f"❗ **{deskripsi_agen}:** Jawaban KOSONG dari model. Mencoba ulang...")
+                time.sleep(5)
                 continue
-            log_ui.write(
-                f"✅ **{deskripsi_agen}:** Selesai! Pendinginan 15 detik"
-                " (menjaga di bawah limit 5 request/menit free tier)..."
-            )
-            time.sleep(15)
+                
+            log_ui.write(f"✅ **{deskripsi_agen}:** Selesai!")
+            time.sleep(2) # OpenAI rate limit handling ringan
             return teks_hasil
+            
         except Exception as e:
-            pesan_error_asli = str(e)
-            pesan_error_upper = pesan_error_asli.upper()
-            if any(
-                k in pesan_error_upper
-                for k in ["503", "429", "RESOURCE_EXHAUSTED", "UNAVAILABLE"]
-            ):
-                log_ui.write(
-                    f"⚠️ **{deskripsi_agen}:** Kena limit rate (kemungkinan 5"
-                    f" request/menit free tier terlampaui). Detail:"
-                    f" `{pesan_error_asli[:300]}`. Menunggu 65 detik agar masuk"
-                    " jendela menit berikutnya..."
-                )
-                time.sleep(65)
+            pesan_error_asli = str(e).upper()
+            if any(k in pesan_error_asli for k in ["429", "RATE_LIMIT"]):
+                log_ui.write(f"⚠️ **{deskripsi_agen}:** Kena limit request OpenAI. Menunggu 30 detik...")
+                time.sleep(30)
             else:
                 if percobaan == maksimal_percobaan - 1:
-                    raise
-                log_ui.write(
-                    f"⚠️ **{deskripsi_agen}:** Error: `{pesan_error_asli[:300]}`."
-                    f" Mencoba ulang ({percobaan + 2}/{maksimal_percobaan})..."
-                )
-                time.sleep(10)
-    log_ui.write(
-        f"❌ **{deskripsi_agen}:** Menyerah setelah {maksimal_percobaan}x"
-        " percobaan (kemungkinan kuota/rate limit API habis — cek Google AI"
-        " Studio / billing akun Gemini-mu)."
-    )
+                    log_ui.write(f"❌ **{deskripsi_agen}:** Gagal setelah {maksimal_percobaan}x. Error: {e}")
+                    return ""
+                log_ui.write(f"⚠️ **{deskripsi_agen}:** Error: {e}. Mencoba ulang ({percobaan + 2}/{maksimal_percobaan})...")
+                time.sleep(5)
     return ""
 
 def bersihkan_dan_parse_json(teks_raw):
     if not teks_raw:
         return []
 
+    # Bersihkan markdown formatting
     teks_bersih = re.sub(r"```json", "", teks_raw, flags=re.IGNORECASE)
     teks_bersih = re.sub(r"```", "", teks_bersih).strip()
 
     try:
         data = json.loads(teks_bersih)
+        # Handle apabila ChatGPT membungkus array di dalam object
         if isinstance(data, dict):
             for _key, value in data.items():
                 if isinstance(value, list):
@@ -283,7 +285,6 @@ def bersihkan_dan_parse_json(teks_raw):
             return json.loads(match.group(0))
         except Exception:
             pass
-
     return []
 
 def tentukan_validasi_manual(item, nomor_kriteria):
@@ -315,30 +316,18 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         ) as status_box:
             suffix = os.path.splitext(uploaded_file.name)[1] or ".pdf"
             temp_path = None
-            gemini_file = None
+            
             try:
-                status_box.write("📄 Membaca berkas PDF...")
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=suffix
-                ) as tmp:
+                status_box.write("📄 Menyimpan berkas PDF sementara...")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                     tmp.write(uploaded_file.getbuffer())
                     temp_path = tmp.name
 
-                status_box.write("☁️ Mengunggah berkas ke Google AI Server...")
-                gemini_file = client.files.upload(file=temp_path)
-
-                while gemini_file.state.name in ["PROCESSING", "PENDING"]:
-                    status_box.write(
-                        f"⏳ Menunggu verifikasi file di Google AI"
-                        f" ({gemini_file.state.name})..."
-                    )
-                    time.sleep(4)
-                    gemini_file = client.files.get(name=gemini_file.name)
-
-                if gemini_file.state.name != "ACTIVE":
-                    raise RuntimeError(
-                        f"Berkas gagal diproses. Status: {gemini_file.state.name}"
-                    )
+                status_box.write("👁️ Mengekstrak gambar/halaman PDF untuk Vision AI...")
+                pdf_images = ekstrak_gambar_pdf(temp_path)
+                
+                if not pdf_images:
+                    raise RuntimeError("Gagal mengekstrak halaman PDF.")
 
                 # --- 1. Ekstraksi Bukti Dokumen ---
                 prompt_1 = (
@@ -447,8 +436,10 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
                     " DITEMUKAN' — jangan mengarang."
                 )
                 laporan_ekstraksi = panggil_ai_dengan_retry(
-                    [gemini_file, prompt_1], "Ekstraksi Bukti Dokumen [1/8]",
-                    status_box,
+                    prompt_text=prompt_1,
+                    deskripsi_agen="Ekstraksi Bukti Dokumen [1/8]",
+                    log_ui=status_box,
+                    pdf_images=pdf_images
                 )
 
                 # --- 2. Verifikasi Bukti Visual & Kelayakan (multimodal) ---
@@ -491,14 +482,15 @@ Cari secara spesifik dokumen/halaman yang diklaim sebagai Form Usulan Perbaikan 
 3. Terdapat kolom tanda tangan persetujuan (Approval) yang SUDAH DITANDATANGANI. 
 JANGAN menganggap form standardisasi (OPL/IK/SOP) atau daftar hadir sosialisasi sebagai FUP. Tandai status sebagai 'ADA DAN APPROVED' (jika ada form FUP dan sudah di-acc), 'ADA TAPI BELUM APPROVED' (jika ada form FUP tapi kolom tanda tangan kosong/belum lengkap), atau 'TIDAK DITEMUKAN / SALAH DOKUMEN' (jika yang dilampirkan adalah dokumen lain seperti OPL/SOP atau tidak ada sama sekali).
 
-Keluarkan HANYA JSON array valid (satu array datar berisi semua temuan A+B+C+D, dibedakan lewat field "kategori"), dengan skema persis:
-[{"kategori": "GATE CHECK", "item": "Kelayakan Proyek Improvement", "status": "LAYAK", "catatan": "alasan spesifik merujuk isi dokumen"}, {"kategori": "5W1H", "item": "How", "status": "TERTUKAR/TIDAK SESUAI", "catatan": "isi kolom How sebenarnya menjelaskan lokasi (Where), bukan metode"}, {"kategori": "FOTO", "item": "Foto halaman 8 (before)", "status": "SESUAI", "catatan": "menunjukkan kondisi mesin sesuai deskripsi masalah"}, {"kategori": "FUP", "item": "Form Usulan Perbaikan", "status": "TIDAK DITEMUKAN / SALAH DOKUMEN", "catatan": "yang dilampirkan adalah form OPL, bukan FUP resmi"}]"""
+Keluarkan HANYA JSON object dengan property 'data' berisi array temuan A+B+C+D, dibedakan lewat field "kategori", dengan skema persis:
+{"data": [{"kategori": "GATE CHECK", "item": "Kelayakan Proyek Improvement", "status": "LAYAK", "catatan": "alasan spesifik merujuk isi dokumen"}, {"kategori": "5W1H", "item": "How", "status": "TERTUKAR/TIDAK SESUAI", "catatan": "isi kolom How sebenarnya menjelaskan lokasi (Where), bukan metode"}, {"kategori": "FOTO", "item": "Foto halaman 8 (before)", "status": "SESUAI", "catatan": "menunjukkan kondisi mesin sesuai deskripsi masalah"}, {"kategori": "FUP", "item": "Form Usulan Perbaikan", "status": "TIDAK DITEMUKAN / SALAH DOKUMEN", "catatan": "yang dilampirkan adalah form OPL, bukan FUP resmi"}]}"""
                 )
                 raw_verifikasi = panggil_ai_dengan_retry(
-                    [gemini_file, prompt_verifikasi],
-                    "Verifikasi Bukti Visual & Kelayakan [2/8]",
-                    status_box,
-                    config=GENERATION_CONFIG_JSON,
+                    prompt_text=prompt_verifikasi,
+                    deskripsi_agen="Verifikasi Bukti Visual & Kelayakan [2/8]",
+                    log_ui=status_box,
+                    pdf_images=pdf_images,
+                    is_json=True
                 )
                 hasil_verifikasi_json = bersihkan_dan_parse_json(raw_verifikasi)
 
@@ -544,13 +536,13 @@ A4. "Standardisasi/Action Plan ke Kelayakan Replikasi": apakah area/mesin yang d
 
 Untuk tiap titik, beri verdict SALAH SATU dari: "KONSISTEN" (jelas dan masuk akal, didukung angka/isi konkret), "LEMAH" (ada tapi kurang detail/agak dipaksakan/tidak ada angka jelas, atau root cause masih bersifat "potensi"), atau "TIDAK KONSISTEN" (ada loncatan logika/tidak nyambung/tidak ditemukan).
 
-Keluarkan HANYA JSON array valid dengan skema persis (field "fase" WAJIB salah satu dari "PLAN", "DO", "CHECK", "ACT"):
-[{{"no": "P1", "fase": "PLAN", "tahap": "5G ke 5W1H", "verdict": "KONSISTEN", "temuan": "penjelasan spesifik merujuk isi dan angka konkret dari dokumen, sebutkan halaman DAN isinya"}}]"""
+Keluarkan HANYA JSON object dengan key 'data' berisi array valid dengan skema persis (field "fase" WAJIB salah satu dari "PLAN", "DO", "CHECK", "ACT"):
+{"data": [{"no": "P1", "fase": "PLAN", "tahap": "5G ke 5W1H", "verdict": "KONSISTEN", "temuan": "penjelasan spesifik merujuk isi dan angka konkret dari dokumen, sebutkan halaman DAN isinya"}]}"""
                 raw_alur_logika = panggil_ai_dengan_retry(
-                    prompt_alur,
-                    "Audit Konsistensi Metodologi PDCA [3/8]",
-                    status_box,
-                    config=GENERATION_CONFIG_JSON,
+                    prompt_text=prompt_alur,
+                    deskripsi_agen="Audit Konsistensi Metodologi PDCA [3/8]",
+                    log_ui=status_box,
+                    is_json=True
                 )
                 hasil_alur_json = bersihkan_dan_parse_json(raw_alur_logika)
 
@@ -578,7 +570,9 @@ Keluarkan HANYA JSON array valid dengan skema persis (field "fase" WAJIB salah s
                     " temuan."
                 )
                 temuan_analisis_kritis = panggil_ai_dengan_retry(
-                    prompt_2, "Analisis Kritis [4/8]", status_box
+                    prompt_text=prompt_2,
+                    deskripsi_agen="Analisis Kritis [4/8]",
+                    log_ui=status_box
                 )
 
                 # --- 5. Analisis Konfirmatif (Tinjauan Pembanding) ---
@@ -594,7 +588,9 @@ Keluarkan HANYA JSON array valid dengan skema persis (field "fase" WAJIB salah s
                     " sudah terbukti dari fakta di atas."
                 )
                 temuan_analisis_konfirmatif = panggil_ai_dengan_retry(
-                    prompt_3, "Analisis Konfirmatif [5/8]", status_box
+                    prompt_text=prompt_3,
+                    deskripsi_agen="Analisis Konfirmatif [5/8]",
+                    log_ui=status_box
                 )
 
                 # --- 6. Sintesis Skoring Rubrik (21 Poin) ---
@@ -654,17 +650,15 @@ TEMUAN ANALISIS KRITIS (pertimbangkan temuan ini dalam penilaian):
 TEMUAN ANALISIS KONFIRMATIF:
 {temuan_analisis_konfirmatif}
 
-Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifikasi harus spesifik, menyebutkan ISI dan ANGKA konkret dari dokumen serta hasil audit alur logika/verifikasi, minimal 1-2 kalimat menjelaskan MENGAPA skor itu diberikan — DILARANG hanya menyebut nomor halaman tanpa penjelasan isinya; WAJIB juga isi field perlu_validasi_manual dan alasan_validasi_manual sesuai aturan di atas):
-[{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik merujuk isi dokumen dan analisis koherensi, sebutkan angka/isi konkret", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}}]"""
+Keluarkan HANYA JSON object dengan key 'data' berisi array valid, tanpa teks lain, dengan skema persis:
+{{"data": [{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik merujuk isi dokumen dan analisis koherensi...", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}}]}}"""
                 raw_sintesis_skoring = panggil_ai_dengan_retry(
-                    prompt_4,
-                    "Sintesis Skoring Rubrik [6/8]",
-                    status_box,
-                    config=GENERATION_CONFIG_JSON,
+                    prompt_text=prompt_4,
+                    deskripsi_agen="Sintesis Skoring Rubrik [6/8]",
+                    log_ui=status_box,
+                    is_json=True
                 )
-                hasil_sintesis_skoring_json = bersihkan_dan_parse_json(
-                    raw_sintesis_skoring
-                )
+                hasil_sintesis_skoring_json = bersihkan_dan_parse_json(raw_sintesis_skoring)
 
                 # --- 7. Analisis Dampak Operasional ---
                 daftar_kategori_str = ", ".join(KATEGORI_IMPACT_14)
@@ -703,15 +697,16 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifik
                     "PENTING: Pada kolom 'keterangan' untuk 'Jenis Saving', WAJIB JELASKAN ALASAN MENGAPA "
                     "Anda mengkategorikannya sebagai Hard/Soft Saving (misal: 'Dikategorikan Keduanya karena terdapat penurunan pemakaian listrik senilai Rp 150jt (Hard) dan penurunan defect (Soft)'). "
                     "JANGAN KOSONGKAN keterangan untuk Jenis Saving.\n\n"
-                    "Keluarkan HANYA JSON array valid dengan skema persis:\n"
-                    '[{"kategori": "Air", "status": "TIDAK", "keterangan":'
-                    ' "alasan singkat merujuk dokumen"}]'
+                    "Keluarkan HANYA JSON object dengan key 'data' berisi array valid dengan skema persis:\n"
+                    '{"data": [{"kategori": "Air", "status": "TIDAK", "keterangan":'
+                    ' "alasan singkat merujuk dokumen"}]}'
                 )
                 raw_analisis_dampak = panggil_ai_dengan_retry(
-                    [gemini_file, prompt_5],
-                    "Analisis Dampak Operasional [7/8]",
-                    status_box,
-                    config=GENERATION_CONFIG_JSON,
+                    prompt_text=prompt_5,
+                    deskripsi_agen="Analisis Dampak Operasional [7/8]",
+                    log_ui=status_box,
+                    pdf_images=pdf_images,
+                    is_json=True
                 )
                 hasil_saving_json = bersihkan_dan_parse_json(raw_analisis_dampak)
 
@@ -746,13 +741,13 @@ HASIL SINTESIS SKORING RUBRIK (skor & justifikasi per kriteria — sumber utama 
 TEMUAN ANALISIS KRITIS:
 {temuan_analisis_kritis}
 
-Keluarkan HANYA JSON array valid dengan skema persis:
-[{{"kategori": "Struktur & Kejelasan Penulisan", "kekuatan": "...", "area_perbaikan": "...", "saran_konkret": "..."}}]"""
+Keluarkan HANYA JSON object dengan key 'data' berisi array valid dengan skema persis:
+{{"data": [{{"kategori": "Struktur & Kejelasan Penulisan", "kekuatan": "...", "area_perbaikan": "...", "saran_konkret": "..."}}]}}"""
                 raw_feedback = panggil_ai_dengan_retry(
-                    prompt_feedback,
-                    "Umpan Balik Peserta [8/8]",
-                    status_box,
-                    config=GENERATION_CONFIG_JSON,
+                    prompt_text=prompt_feedback,
+                    deskripsi_agen="Umpan Balik Peserta [8/8]",
+                    log_ui=status_box,
+                    is_json=True
                 )
                 hasil_feedback_json = bersihkan_dan_parse_json(raw_feedback)
 
@@ -930,11 +925,6 @@ Keluarkan HANYA JSON array valid dengan skema persis:
                         os.remove(temp_path)
                     except OSError:
                         pass
-                if gemini_file is not None:
-                    try:
-                        client.files.delete(name=gemini_file.name)
-                    except Exception:
-                        pass
 
 # ==========================================
 # 5. HASIL PENILAIAN & UNDUH EXCEL
@@ -958,7 +948,7 @@ if st.session_state.proses_selesai:
             + "\n".join(f"- {nama}" for nama in agen_kosong)
             + "\n\nTabel di bawah mungkin kosong/tidak lengkap akibat ini."
             " Coba jalankan ulang, atau cek log saat proses berjalan untuk"
-            " detail `finish_reason`."
+            " detail."
         )
 
     verdict_gate = None
