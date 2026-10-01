@@ -1,0 +1,291 @@
+"""
+claude_judge.py
+Modul Juri Claude untuk Portal Validasi Kaizen.
+
+Isi:
+1. panggil_claude_dengan_retry : memanggil Claude API (PDF dibaca langsung: teks + foto)
+2. jalankan_juri_claude        : menjalankan SELURUH alur yang sama dengan Gemini,
+                                 memakai prompt asli di app utama (tidak ditulis ulang)
+3. tandai_skor_tidak_valid     : cek skor vs pilihan resmi rubrik 21 poin
+4. bandingkan_rubrik / bandingkan_status : tabel perbandingan Gemini vs Claude
+"""
+
+import base64
+import json
+import re
+import time
+
+import anthropic
+import pandas as pd
+
+# ==========================================
+# KONFIGURASI
+# ==========================================
+MODEL_CLAUDE = "claude-sonnet-5-5"  # alternatif lebih kuat (lebih mahal): "claude-opus-5-5"
+MAKS_TOKEN_OUTPUT = 16000
+BATAS_PDF_MB = 24  # batas request API 32 MB; base64 menambah ~33%, jadi dibatasi 24 MB mentah
+
+SYSTEM_PROMPT_CLAUDE = (
+    "Anda adalah auditor Kaizen senior yang teliti, skeptis secara metodologis, dan objektif. "
+    "Anda membaca dokumen PDF yang dilampirkan secara langsung (teks DAN gambar/foto/diagram di dalamnya). "
+    "Hanya laporkan fakta yang benar-benar ada di dokumen; jangan mengarang. "
+    "Jika diminta format JSON, keluarkan HANYA JSON valid tanpa teks lain dan tanpa markdown."
+)
+
+CATATAN_PDF_ASLI = (
+    "\n\nCATATAN KHUSUS JURI CLAUDE: Anda memegang PDF aslinya (teks + gambar). "
+    "Jika ringkasan/ekstraksi/audit di atas bertentangan dengan isi PDF aslinya, PERCAYAI PDF aslinya "
+    "dan sebutkan koreksinya secara eksplisit. Untuk klaim yang bergantung pada foto, angka, atau tanda tangan, "
+    "cek langsung ke halaman PDF terkait sebelum memberi verdict atau skor. "
+    "Format output tetap mengikuti instruksi di atas."
+)
+
+# Pilihan skor resmi per kriteria (sesuai RUBRIK_21_POIN_DETAIL di app utama).
+SKOR_VALID = {
+    1: [0, 1, 2], 2: [0, 1, 2], 3: [0, 1, 2], 4: [0, 1, 2], 5: [0, 2],
+    6: [0, 1, 2], 7: [0, 1, 2], 8: [0, 1, 2], 9: [0, 3, 5], 10: [0, 1, 2],
+    11: [0, 1, 2], 12: [0, 1, 2], 13: [0, 3, 5], 14: [0, 1, 2], 15: [0, 5, 8],
+    16: [0, 1], 17: [0, 3, 5], 18: [0, 3, 5], 19: [0, 1, 2], 20: [0, 3, 5],
+    21: [0, 3, 5],
+}
+SKOR_MAKS_TOTAL = sum(max(v) for v in SKOR_VALID.values())  # 65 menurut rubrik di kode
+
+
+# ==========================================
+# 1. PEMANGGILAN CLAUDE API
+# ==========================================
+def siapkan_pdf_claude(pdf_bytes):
+    ukuran_mb = len(pdf_bytes) / (1024 * 1024)
+    if ukuran_mb > BATAS_PDF_MB:
+        raise ValueError(
+            f"PDF berukuran {ukuran_mb:.1f} MB, melebihi batas {BATAS_PDF_MB} MB untuk Claude. Kompres PDF terlebih dahulu."
+        )
+    return base64.standard_b64encode(pdf_bytes).decode("utf-8")
+
+
+def panggil_claude_dengan_retry(client, pdf_b64, prompt_text, deskripsi_agen, log_ui, maksimal_percobaan=3):
+    """PDF dikirim sebagai blok 'document' + di-cache, sehingga panggilan berikutnya
+    (yang memakai PDF yang sama) jauh lebih murah dan cepat."""
+    konten = []
+    if pdf_b64:
+        konten.append({
+            "type": "document",
+            "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64},
+            "cache_control": {"type": "ephemeral"},
+        })
+    konten.append({"type": "text", "text": prompt_text})
+
+    kwargs = dict(
+        model=MODEL_CLAUDE,
+        max_tokens=MAKS_TOKEN_OUTPUT,
+        temperature=0,  # prioritas konsistensi
+        system=SYSTEM_PROMPT_CLAUDE,
+        messages=[{"role": "user", "content": konten}],
+    )
+
+    for percobaan in range(maksimal_percobaan):
+        try:
+            log_ui.write(f"⏳ **{deskripsi_agen} (Claude):** Sedang menganalisis...")
+            with client.messages.stream(**kwargs) as stream:
+                pesan = stream.get_final_message()
+            teks = "".join(b.text for b in pesan.content if b.type == "text").strip()
+            if pesan.stop_reason == "max_tokens":
+                log_ui.write(f"⚠️ **Claude:** output {deskripsi_agen} terpotong (batas token). Hasil JSON mungkin tidak lengkap.")
+            if not teks:
+                time.sleep(8)
+                continue
+            log_ui.write(f"✅ **{deskripsi_agen} (Claude):** Selesai!")
+            return teks
+        except anthropic.RateLimitError as e:
+            tunggu = 65
+            try:
+                tunggu = int(float(e.response.headers.get("retry-after", 60))) + 5
+            except Exception:
+                pass
+            log_ui.write(f"⚠️ **Claude:** kena limit rate. Menunggu {tunggu} detik...")
+            time.sleep(tunggu)
+        except anthropic.BadRequestError as e:
+            if "temperature" in str(e).lower() and "temperature" in kwargs:
+                kwargs.pop("temperature")  # model ini tidak menerima parameter temperature
+                log_ui.write("ℹ️ **Claude:** parameter temperature tidak didukung model ini, mengulang tanpa itu...")
+                continue
+            log_ui.write(f"❌ **Claude:** permintaan ditolak (tidak akan diulang): {e}")
+            return ""
+        except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
+            log_ui.write(f"⚠️ **Claude:** error server/koneksi: {e}. Mencoba ulang dalam 20 detik...")
+            time.sleep(20)
+        except Exception as e:
+            log_ui.write(f"⚠️ **Claude:** error tak terduga: {e}. Mencoba ulang...")
+            time.sleep(10)
+    return ""
+
+
+def json_terbaca(teks):
+    """Cek cepat apakah keluaran berupa JSON valid (setelah pagar markdown dibuang)."""
+    if not teks:
+        return False
+    bersih = re.sub(r"```(?:json)?", "", teks, flags=re.IGNORECASE).strip()
+    try:
+        return isinstance(json.loads(bersih), (list, dict))
+    except json.JSONDecodeError:
+        return False
+
+
+def ganti_sumber(prompt, pasangan):
+    """Mengganti teks hasil-Gemini di dalam prompt asli dengan teks hasil-Claude,
+    sehingga prompt asli di app utama dipakai apa adanya (tidak ditulis ulang)."""
+    hasil = prompt
+    for lama, baru in pasangan:
+        if lama and lama.strip() and baru is not None:
+            hasil = hasil.replace(lama, baru)
+    return hasil
+
+
+# ==========================================
+# 2. ALUR JURI CLAUDE (identik dengan alur Gemini, tapi independen)
+# ==========================================
+def jalankan_juri_claude(client, pdf_bytes, ctx, log_ui):
+    """ctx = dict berisi prompt asli + hasil Gemini (lihat panduan integrasi)."""
+    pdf_b64 = siapkan_pdf_claude(pdf_bytes)
+
+    def panggil(prompt, nama, pakai_pdf=True):
+        # Langkah yang hanya butuh teks (konfirmatif, feedback) tidak perlu melampirkan PDF -> hemat token
+        return panggil_claude_dengan_retry(client, pdf_b64 if pakai_pdf else None, prompt, nama, log_ui)
+
+    def panggil_json(prompt, nama, pakai_pdf=True):
+        # Kalau keluaran bukan JSON valid, ulang SATU langkah itu saja (bukan seluruh pipeline)
+        teks = panggil(prompt, nama, pakai_pdf)
+        if json_terbaca(teks):
+            return teks
+        log_ui.write(f"⚠️ **Claude:** keluaran {nama} bukan JSON valid. Mengulang satu kali...")
+        ulang = panggil(prompt, nama, pakai_pdf)
+        return ulang if json_terbaca(ulang) else (ulang or teks)
+
+    E, V = ctx["ekstraksi"], ctx["verifikasi"]
+
+    # 1 & 2. Claude membaca PDF sendiri (bukan memakai ekstraksi Gemini) -> penilaian benar-benar independen
+    ekstraksi = panggil(ctx["prompt_1"], "Ekstraksi Bukti Dokumen")
+    verifikasi = panggil_json(ctx["prompt_verifikasi"], "Verifikasi Visual & FUP")
+
+    # 3. Audit logika PDCA
+    prompt_alur = ganti_sumber(ctx["prompt_alur"], [(E, ekstraksi), (V, verifikasi)]) + CATATAN_PDF_ASLI
+    alur = panggil_json(prompt_alur, "Audit Logika")
+
+    # 4 & 5. Analisis kritis & konfirmatif
+    prompt_2 = ganti_sumber(ctx["prompt_2"], [(E, ekstraksi), (ctx["alur"], alur)]) + CATATAN_PDF_ASLI
+    kritis = panggil(prompt_2, "Analisis Kritis")
+    prompt_3 = ganti_sumber(ctx["prompt_3"], [(E, ekstraksi), (ctx["kritis"], kritis)])
+    konfirmatif = panggil(prompt_3, "Analisis Konfirmatif", pakai_pdf=False)
+
+    # 6. Skoring rubrik
+    base = ganti_sumber(
+        ctx["prompt_skoring_base"],
+        [(E, ekstraksi), (V, verifikasi), (ctx["kritis"], kritis), (ctx["konfirmatif"], konfirmatif)],
+    )
+    skoring = panggil_json(
+        f"{base}\n\nHASIL AUDIT KONSISTENSI METODOLOGI PDCA:\n{alur}{CATATAN_PDF_ASLI}", "Skoring Rubrik"
+    )
+
+    # 7. Saving
+    saving = panggil_json(ganti_sumber(ctx["prompt_saving"], [(E, ekstraksi)]), "Analisis Saving")
+
+    # 8. Feedback peserta
+    feedback_base = ganti_sumber(ctx["prompt_feedback_base"], [(E, ekstraksi), (V, verifikasi)])
+    feedback = panggil_json(
+        f"{feedback_base}\n\nAUDIT LOGIKA:\n{alur}\n\nHASIL SKORING:\n{skoring}", "Umpan Balik", pakai_pdf=False
+    )
+
+    return {
+        "ekstraksi": ekstraksi, "verifikasi": verifikasi, "alur": alur,
+        "kritis": kritis, "konfirmatif": konfirmatif,
+        "skoring": skoring, "saving": saving, "feedback": feedback,
+    }
+
+
+# ==========================================
+# 3. VALIDASI SKOR TERHADAP PILIHAN RUBRIK
+# ==========================================
+def tandai_skor_tidak_valid(df):
+    """Menambah kolom 'cek skor' kalau skor AI di luar pilihan resmi rubrik
+    (misal skor 1 pada kriteria 5, atau skor 4 pada kriteria 9)."""
+    if df is None or df.empty or "skor" not in df.columns or "no" not in df.columns:
+        return df
+    df = df.copy()
+
+    def cek(baris):
+        try:
+            no = int(baris["no"])
+            skor = float(baris["skor"])
+        except (TypeError, ValueError):
+            return "⚠️ no/skor tidak terbaca"
+        pilihan = SKOR_VALID.get(no)
+        if pilihan is None:
+            return ""
+        return "" if skor in pilihan else f"⚠️ pilihan valid: {pilihan}"
+
+    df["cek skor"] = df.apply(cek, axis=1)
+    return df
+
+
+def hitung_total(df):
+    if df is None or df.empty or "skor" not in df.columns:
+        return 0.0
+    return float(pd.to_numeric(df["skor"], errors="coerce").fillna(0).sum())
+
+
+# ==========================================
+# 4. PERBANDINGAN GEMINI vs CLAUDE
+# ==========================================
+def _siapkan_rubrik(df, akhiran):
+    kolom = ["no", "kriteria", "skor", "status validasi", "justifikasi"]
+    d = df.reindex(columns=kolom).copy()
+    d["no"] = pd.to_numeric(d["no"], errors="coerce")
+    d["skor"] = pd.to_numeric(d["skor"], errors="coerce")
+    d = d.dropna(subset=["no"])
+    d["no"] = d["no"].astype(int)
+    return d.rename(columns={
+        "kriteria": f"kriteria_{akhiran}", "skor": f"skor_{akhiran}",
+        "status validasi": f"validasi_{akhiran}", "justifikasi": f"justifikasi_{akhiran}",
+    })
+
+
+def bandingkan_rubrik(df_gemini, df_claude):
+    if df_gemini is None or df_claude is None or df_gemini.empty or df_claude.empty:
+        return pd.DataFrame()
+    g = _siapkan_rubrik(df_gemini, "gemini")
+    c = _siapkan_rubrik(df_claude, "claude")
+    gab = g.merge(c, on="no", how="outer").sort_values("no").reset_index(drop=True)
+    gab["kriteria"] = gab["kriteria_gemini"].combine_first(gab["kriteria_claude"])
+    gab["selisih"] = (gab["skor_gemini"] - gab["skor_claude"]).abs()
+
+    def putusan(r):
+        if pd.isna(r["skor_gemini"]) or pd.isna(r["skor_claude"]):
+            return "DATA KURANG"
+        return "SEPAKAT" if r["selisih"] == 0 else "BEDA — periksa"
+
+    gab["putusan"] = gab.apply(putusan, axis=1)
+    urutan = [
+        "no", "kriteria", "skor_gemini", "skor_claude", "selisih", "putusan",
+        "validasi_gemini", "validasi_claude", "justifikasi_gemini", "justifikasi_claude",
+    ]
+    return gab[urutan]
+
+
+def bandingkan_status(df_a, df_b, kunci, kolom, nama_a="gemini", nama_b="claude"):
+    """Perbandingan umum untuk tabel berstatus: audit alur (kunci='no', kolom='verdict')
+    dan saving (kunci='kategori', kolom='status')."""
+    for d in (df_a, df_b):
+        if d is None or d.empty or kunci not in d.columns or kolom not in d.columns:
+            return pd.DataFrame()
+    ka, kb = f"{kolom}_{nama_a}", f"{kolom}_{nama_b}"
+    a = df_a[[kunci, kolom]].rename(columns={kolom: ka})
+    b = df_b[[kunci, kolom]].rename(columns={kolom: kb})
+    gab = a.merge(b, on=kunci, how="outer")
+
+    def putusan(r):
+        if pd.isna(r[ka]) or pd.isna(r[kb]):
+            return "DATA KURANG"
+        return "SEPAKAT" if str(r[ka]).strip().upper() == str(r[kb]).strip().upper() else "BEDA — periksa"
+
+    gab["putusan"] = gab.apply(putusan, axis=1)
+    return gab
