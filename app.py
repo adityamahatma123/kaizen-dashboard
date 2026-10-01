@@ -152,6 +152,22 @@ KATEGORI_IMPACT_14 = [
     "Overtime", "Listrik", "Air", "Stock Accuracy", "Inventory / Material Value",
     "DOI", "Quality", "Safety & Environment", "SOC & HTA",
 ]
+DEFINISI_KATEGORI_IMPACT = {
+    "Gas / Steam": "Mengurangi pemakaian gas, penurunan rasio gas terhadap output, dll",
+    "Material Balance": "Mengurangi selisih material balance",
+    "Manpower": "Pengurangan manpower",
+    "Downtime": "Pengurangan menit downtime",
+    "Waktu / Proses Kerja": "Pengurangan menit proses kerja",
+    "Overtime": "Pengurangan menit overtime",
+    "Listrik": "Mengurangi pemakaian listrik, penurunan rasio listrik terhadap output, dll",
+    "Air": "Mengurangi pemakaian air, penurunan rasio air terhadap output, dll",
+    "Stock Accuracy": "Meningkatkan akurasi stok / mengurangi selisih stok",
+    "Inventory / Material Value": "Penurunan inventory value (umumnya gudang) atau penghematan penggunaan material",
+    "DOI": "Mengurangi days of inventory",
+    "Quality": "Mengurangi risiko terkait kualitas / quality incident",
+    "Safety & Environment": "Mengurangi / eliminasi risiko terhadap kesehatan, keselamatan, dan lingkungan bekerja",
+    "SOC & HTA": "Mengurangi / eliminasi sumber pengotor atau risiko terhadap area sulit terjangkau",
+}
 
 # ==========================================
 # 2. INISIALISASI MEMORI SESI (SESSION STATE)
@@ -476,7 +492,10 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifik
                 raw_skoring_gpt = panggil_openai_dengan_retry(f"{prompt_skoring_base}\n\nHASIL AUDIT KONSISTENSI METODOLOGI PDCA:\n{raw_alur_gpt}", "Skoring Rubrik", status_box)
 
                 # --- 7. Analisis Dampak & Saving (GEMINI & GPT) ---
-                daftar_kategori_str = ", ".join(KATEGORI_IMPACT_14)
+                daftar_kategori_str = (
+    "(tulis nama kategori PERSIS seperti sebelum tanda titik dua; definisi di kanan adalah patokan dari form resmi)\n"
+    + "\n".join(f"- {k}: {DEFINISI_KATEGORI_IMPACT[k]}" for k in KATEGORI_IMPACT_14)
+)
                 prompt_saving = f"""Anda adalah Analis Dampak Operasional yang menilai dampak operasional dari dokumen Kaizen ini secara objektif berdasarkan bukti tertulis saja.
 
 ATURAN MEMBACA TABEL IMPACT/MANFAAT: dokumen Kaizen sering memuat tabel dengan format 'kategori impact | ambang batas skor rendah | ambang batas skor tinggi | penjelasan'. Dua kolom di tengah (misal 'Mengurangi ≤ 1%' vs 'Mengurangi >5%') adalah AMBANG BATAS/SKALA PENILAIAN GENERIK yang SELALU muncul di semua baris kategori terlepas dari relevansinya dengan proyek ini — ini BUKAN bukti pencapaian aktual. Kolom 'PENJELASAN'/'keterangan' di ujung kanan tabel adalah SATU-SATUNYA kolom yang berisi pencapaian AKTUAL proyek ini. Kalau kolom penjelasan untuk suatu kategori KOSONG SEPENUHNYA (tidak ada satu kalimat pun), kategori itu TIDAK diukur/tidak terdampak oleh proyek ini — JANGAN mengarang atau menyimpulkan pencapaian dari angka ambang batas skala pada kolom tengah.
@@ -487,7 +506,7 @@ FAKTA DOKUMEN:
 Evaluasi {len(KATEGORI_IMPACT_14)} kategori impact berikut: {daftar_kategori_str}.
 Untuk setiap kategori, status HARUS salah satu dari: 'IYA' (ada dampak terbukti dengan KETERANGAN/PENJELASAN AKTUAL yang jelas di dokumen — bukan sekadar ambang batas skala penilaian), 'TIDAK' (tidak ada dampak/tidak disebutkan sama sekali, ATAU kolom penjelasan/keterangan untuk kategori itu kosong), atau 'TIDAK YAKIN' (ADA keterangan/penjelasan tapi tidak lengkap/ambigu/tidak cukup data pendukung).
 
-SELAIN itu, tentukan juga 'Jenis Saving' berdasarkan dokumen. Pilihan statusnya adalah: 'Hard Saving' (saving finansial nyata >100 juta rupiah/tahun, terkait penurunan pemakaian gas/listrik/air/pembelian material/manpower), 'Virtual/Soft Saving' (saving tidak real, berupa opportunity loss yang dihindari, cost avoidance, material balance/stock akurasi, atau penurunan customer complaint), 'Keduanya', atau 'Tidak Ada'. 
+SELAIN itu, tentukan juga 'Jenis Saving' berdasarkan dokumen. Pilihan statusnya adalah: 'Hard Saving' (saving yang real, nilai >100 juta rupiah/tahun, umumnya terkait penurunan pemakaian gas, listrik, air, uji riksa, dan pembelian material seperti RMPM, BBC, BBP), 'Virtual/Soft Saving' (saving yang tidak real / cost avoidance, umumnya terkait material balance, stock akurasi, dan customer complain), 'Keduanya', atau 'Tidak Ada'. 
 PENTING: Pada kolom 'keterangan' untuk 'Jenis Saving', WAJIB JELASKAN ALASAN MENGAPA Anda mengkategorikannya sebagai Hard/Soft Saving (misal: 'Dikategorikan Keduanya karena terdapat penurunan pemakaian listrik senilai Rp 150jt (Hard) dan penurunan defect (Soft)'). JANGAN KOSONGKAN keterangan untuk Jenis Saving.
 
 Keluarkan HANYA JSON array valid dengan skema persis:
