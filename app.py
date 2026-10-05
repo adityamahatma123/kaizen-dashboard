@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 from google import genai
 from google.genai import types
-from openai import OpenAI
+from groq import Groq
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN & TEMA (UI/UX)
@@ -69,7 +69,7 @@ st.markdown(
 st.title("🏢 Portal Validasi Kaizen (Dual-AI Judge)")
 st.markdown(
     "<p style='text-align: center; color: #7F8C8D; font-size: 1.1rem; font-weight: 400; margin-bottom: 2rem;'>Unggah"
-    " dokumen evaluasi, bandingkan analisis Gemini vs GPT secara <i>apple-to-apple</i>, lalu lakukan validasi akhir secara manual pada poin-poin kritikal.</p>",
+    " dokumen evaluasi, bandingkan analisis Gemini vs Llama-3 (Groq) secara <i>apple-to-apple</i>, lalu lakukan validasi akhir secara manual.</p>",
     unsafe_allow_html=True,
 )
 st.divider()
@@ -81,14 +81,15 @@ try:
     API_KEY_GEMINI = st.secrets["GEMINI_API_KEY"].strip()
     client_gemini = genai.Client(api_key=API_KEY_GEMINI)
     
-    API_KEY_OPENAI = st.secrets["OPENAI_API_KEY"].strip()
-    client_openai = OpenAI(api_key=API_KEY_OPENAI)
+    API_KEY_GROQ = st.secrets["GROQ_API_KEY"].strip()
+    client_groq = Groq(api_key=API_KEY_GROQ)
 except Exception as e:
-    st.error(f"Gagal memuat API Key. Pastikan GEMINI_API_KEY dan OPENAI_API_KEY tersedia di Secrets. Detail: {e}")
+    st.error(f"Gagal memuat API Key. Pastikan GEMINI_API_KEY dan GROQ_API_KEY tersedia di Secrets. Detail: {e}")
     st.stop()
 
 MODEL_GEMINI = "gemini-3.5-flash-lite"
-MODEL_GPT = "gpt-4o-mini"
+# Menggunakan Llama 3.3 70B Versatile dari Groq untuk reasoning tinggi & memori besar
+MODEL_GROQ = "llama-3.3-70b-versatile"
 
 GENERATION_CONFIG_TEXT = types.GenerateContentConfig(
     seed=42, thinking_config=types.ThinkingConfig(thinking_level="medium")
@@ -152,22 +153,6 @@ KATEGORI_IMPACT_14 = [
     "Overtime", "Listrik", "Air", "Stock Accuracy", "Inventory / Material Value",
     "DOI", "Quality", "Safety & Environment", "SOC & HTA",
 ]
-DEFINISI_KATEGORI_IMPACT = {
-    "Gas / Steam": "Mengurangi pemakaian gas, penurunan rasio gas terhadap output, dll",
-    "Material Balance": "Mengurangi selisih material balance",
-    "Manpower": "Pengurangan manpower",
-    "Downtime": "Pengurangan menit downtime",
-    "Waktu / Proses Kerja": "Pengurangan menit proses kerja",
-    "Overtime": "Pengurangan menit overtime",
-    "Listrik": "Mengurangi pemakaian listrik, penurunan rasio listrik terhadap output, dll",
-    "Air": "Mengurangi pemakaian air, penurunan rasio air terhadap output, dll",
-    "Stock Accuracy": "Meningkatkan akurasi stok / mengurangi selisih stok",
-    "Inventory / Material Value": "Penurunan inventory value (umumnya gudang) atau penghematan penggunaan material",
-    "DOI": "Mengurangi days of inventory",
-    "Quality": "Mengurangi risiko terkait kualitas / quality incident",
-    "Safety & Environment": "Mengurangi / eliminasi risiko terhadap kesehatan, keselamatan, dan lingkungan bekerja",
-    "SOC & HTA": "Mengurangi / eliminasi sumber pengotor atau risiko terhadap area sulit terjangkau",
-}
 
 # ==========================================
 # 2. INISIALISASI MEMORI SESI (SESSION STATE)
@@ -181,11 +166,11 @@ if "df_saving_gemini" not in st.session_state: st.session_state.df_saving_gemini
 if "df_feedback_gemini" not in st.session_state: st.session_state.df_feedback_gemini = pd.DataFrame()
 if "total_skor_gemini" not in st.session_state: st.session_state.total_skor_gemini = 0.0
 
-if "df_alur_gpt" not in st.session_state: st.session_state.df_alur_gpt = pd.DataFrame()
-if "df_rubrik_gpt" not in st.session_state: st.session_state.df_rubrik_gpt = pd.DataFrame()
-if "df_saving_gpt" not in st.session_state: st.session_state.df_saving_gpt = pd.DataFrame()
-if "df_feedback_gpt" not in st.session_state: st.session_state.df_feedback_gpt = pd.DataFrame()
-if "total_skor_gpt" not in st.session_state: st.session_state.total_skor_gpt = 0.0
+if "df_alur_groq" not in st.session_state: st.session_state.df_alur_groq = pd.DataFrame()
+if "df_rubrik_groq" not in st.session_state: st.session_state.df_rubrik_groq = pd.DataFrame()
+if "df_saving_groq" not in st.session_state: st.session_state.df_saving_groq = pd.DataFrame()
+if "df_feedback_groq" not in st.session_state: st.session_state.df_feedback_groq = pd.DataFrame()
+if "total_skor_groq" not in st.session_state: st.session_state.total_skor_groq = 0.0
 
 if "transkrip" not in st.session_state: st.session_state.transkrip = []
 if "nama_file" not in st.session_state: st.session_state.nama_file = "Dokumen_Kaizen"
@@ -215,32 +200,50 @@ def panggil_ai_dengan_retry(contents, deskripsi_agen, log_ui, config=None, maksi
                 time.sleep(10)
     return ""
 
-def panggil_openai_dengan_retry(prompt_text, deskripsi_agen, log_ui, maksimal_percobaan=3):
+def panggil_groq_dengan_retry(prompt_text, deskripsi_agen, log_ui, maksimal_percobaan=3):
+    # Groq sangat cepat dan rate limit gratisnya cukup longgar (umumnya 30 RPM).
+    # Jeda tidur dikurangi drastis menjadi hanya 2 detik.
     for percobaan in range(maksimal_percobaan):
         try:
-            log_ui.write(f"⏳ **{deskripsi_agen} (GPT):** Sedang mengevaluasi...")
-            response = client_openai.chat.completions.create(
-                model=MODEL_GPT,
+            log_ui.write(f"⏳ **{deskripsi_agen} (Groq Llama 3):** Sedang mengevaluasi super cepat...")
+            response = client_groq.chat.completions.create(
+                model=MODEL_GROQ,
                 messages=[
-                    {"role": "system", "content": "Anda adalah asisten auditor Kaizen tingkat senior. Wajib merespons HANYA dengan format JSON Array valid tanpa teks markdown tambahan."},
+                    {"role": "system", "content": "Anda adalah asisten auditor Kaizen tingkat senior. Wajib merespons HANYA dengan format JSON Array valid (dimulai dengan [ dan diakhiri dengan ]), tanpa teks markdown tambahan."},
                     {"role": "user", "content": prompt_text}
                 ],
                 temperature=0.2
             )
             teks_hasil = response.choices[0].message.content
-            # Hard-brake 22 detik untuk aman dari 3 RPM (Limit Free Tier OpenAI)
-            log_ui.write(f"✅ **{deskripsi_agen} (GPT):** Selesai! (Cooldown Ketat 22 detik untuk limit API)")
-            time.sleep(22) 
+            log_ui.write(f"✅ **{deskripsi_agen} (Groq Llama 3):** Selesai dalam sekejap!")
+            time.sleep(2) # Jeda ringan
             return teks_hasil
         except Exception as e:
-            log_ui.write(f"⚠️ **GPT:** Error: {e}. Menunggu 25 detik...")
-            time.sleep(25)
+            if "429" in str(e):
+                log_ui.write(f"⚠️ **Groq:** Limit tercapai. Menunggu 10 detik...")
+                time.sleep(10)
+            else:
+                log_ui.write(f"⚠️ **Groq:** Error: {e}. Mencoba ulang...")
+                time.sleep(5)
     return ""
 
 def bersihkan_dan_parse_json(teks_raw):
     if not teks_raw: return []
+    # Groq Llama kadang masih menyisipkan markdown ```json meskipun dilarang
     teks_bersih = re.sub(r"```json", "", teks_raw, flags=re.IGNORECASE)
     teks_bersih = re.sub(r"```", "", teks_bersih).strip()
+    
+    # Kadang model merespon dengan teks sebelum array '['
+    start_idx = teks_bersih.find('[')
+    end_idx = teks_bersih.rfind(']')
+    
+    if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
+        teks_array = teks_bersih[start_idx:end_idx+1]
+        try:
+            return json.loads(teks_array)
+        except json.JSONDecodeError:
+            pass
+
     try:
         data = json.loads(teks_bersih)
         if isinstance(data, dict):
@@ -250,10 +253,7 @@ def bersihkan_dan_parse_json(teks_raw):
         return data if isinstance(data, list) else []
     except json.JSONDecodeError:
         pass
-    match = re.search(r"\[\s*\{.*?\}\s*\]", teks_raw, re.DOTALL)
-    if match:
-        try: return json.loads(match.group(0))
-        except Exception: pass
+        
     return []
 
 def tentukan_validasi_manual(item, nomor_kriteria):
@@ -299,7 +299,7 @@ def format_tabel_rubrik(json_data):
 uploaded_file = st.file_uploader("Pilih file PDF Kaizen", type="pdf")
 
 if uploaded_file is not None and not st.session_state.proses_selesai:
-    if st.button("🚀 Mulai Penilaian AI (Gemini + GPT)"):
+    if st.button("🚀 Mulai Penilaian AI (Gemini + Groq)"):
         st.session_state.nama_file = uploaded_file.name
 
         with st.status("🤖 AI Multi-Agent sedang bekerja...", expanded=True) as status_box:
@@ -363,7 +363,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
                 )
                 raw_verifikasi = panggil_ai_dengan_retry([gemini_file, prompt_verifikasi], "Verifikasi Visual & FUP", status_box, config=GENERATION_CONFIG_JSON)
 
-                # --- 3. Audit Logika PDCA (GEMINI & GPT) ---
+                # --- 3. Audit Logika PDCA (GEMINI & GROQ) ---
                 prompt_alur = f"""Anda adalah Analis Audit Konsistensi Metodologi PDCA (QC-Story) yang menelusuri "benang merah" (golden thread): apakah tiap tools di tiap fase PDCA benar-benar tersambung MASUK AKAL secara teknis/operasional ke tools sebelum dan sesudahnya — bukan cuma sama-sama ada di dokumen.
 
 Gunakan pengetahuan umum troubleshooting industri sebagai patokan kewajaran sebab-akibat. Contoh MASUK AKAL: "mesin macet" -> kenapa? "bearing aus" -> kenapa? "kurang pelumasan" -> kenapa? "tidak ada jadwal preventive maintenance". Contoh TIDAK MASUK AKAL: "mesin macet" tiba-tiba dijawab "operator kurang training" tanpa penjelasan penghubung.
@@ -409,7 +409,7 @@ Keluarkan HANYA JSON array valid dengan skema persis (field "fase" WAJIB salah s
 [{{"no": "P1", "fase": "PLAN", "tahap": "5G ke 5W1H", "verdict": "KONSISTEN", "temuan": "penjelasan spesifik merujuk isi dan angka konkret dari dokumen, sebutkan halaman DAN isinya"}}]"""
                 
                 raw_alur_gemini = panggil_ai_dengan_retry(prompt_alur, "Audit Logika", status_box, config=GENERATION_CONFIG_JSON)
-                raw_alur_gpt = panggil_openai_dengan_retry(prompt_alur, "Audit Logika", status_box)
+                raw_alur_groq = panggil_groq_dengan_retry(prompt_alur, "Audit Logika", status_box)
 
                 # --- 4 & 5. Analisis Kritis & Konfirmatif (HANYA GEMINI - Sebagai bahan skoring) ---
                 prompt_2 = (
@@ -431,7 +431,7 @@ Keluarkan HANYA JSON array valid dengan skema persis (field "fase" WAJIB salah s
                 )
                 temuan_analisis_konfirmatif = panggil_ai_dengan_retry(prompt_3, "Analisis Konfirmatif", status_box)
 
-                # --- 6. Sintesis Skoring Rubrik (GEMINI & GPT) ---
+                # --- 6. Sintesis Skoring Rubrik (GEMINI & GROQ) ---
                 prompt_skoring_base = f"""Anda adalah modul Sintesis Skoring Rubrik yang wajib bersikap objektif, konsisten, dan KRITIS TERHADAP ISI — bukan cuma mengecek "ada/tidak ada elemen", tapi memverifikasi apakah isinya benar secara logika, tepat kategorinya, dan nyambung alur PDCA-nya.
 
 ATURAN PENILAIAN:
@@ -489,13 +489,10 @@ Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifik
 [{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik merujuk isi dokumen dan analisis koherensi, sebutkan angka/isi konkret", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}}]"""
                 
                 raw_skoring_gemini = panggil_ai_dengan_retry(f"{prompt_skoring_base}\n\nHASIL AUDIT KONSISTENSI METODOLOGI PDCA:\n{raw_alur_gemini}", "Skoring Rubrik", status_box, config=GENERATION_CONFIG_JSON)
-                raw_skoring_gpt = panggil_openai_dengan_retry(f"{prompt_skoring_base}\n\nHASIL AUDIT KONSISTENSI METODOLOGI PDCA:\n{raw_alur_gpt}", "Skoring Rubrik", status_box)
+                raw_skoring_groq = panggil_groq_dengan_retry(f"{prompt_skoring_base}\n\nHASIL AUDIT KONSISTENSI METODOLOGI PDCA:\n{raw_alur_groq}", "Skoring Rubrik", status_box)
 
-                # --- 7. Analisis Dampak & Saving (GEMINI & GPT) ---
-                daftar_kategori_str = (
-    "(tulis nama kategori PERSIS seperti sebelum tanda titik dua; definisi di kanan adalah patokan dari form resmi)\n"
-    + "\n".join(f"- {k}: {DEFINISI_KATEGORI_IMPACT[k]}" for k in KATEGORI_IMPACT_14)
-)
+                # --- 7. Analisis Dampak & Saving (GEMINI & GROQ) ---
+                daftar_kategori_str = ", ".join(KATEGORI_IMPACT_14)
                 prompt_saving = f"""Anda adalah Analis Dampak Operasional yang menilai dampak operasional dari dokumen Kaizen ini secara objektif berdasarkan bukti tertulis saja.
 
 ATURAN MEMBACA TABEL IMPACT/MANFAAT: dokumen Kaizen sering memuat tabel dengan format 'kategori impact | ambang batas skor rendah | ambang batas skor tinggi | penjelasan'. Dua kolom di tengah (misal 'Mengurangi ≤ 1%' vs 'Mengurangi >5%') adalah AMBANG BATAS/SKALA PENILAIAN GENERIK yang SELALU muncul di semua baris kategori terlepas dari relevansinya dengan proyek ini — ini BUKAN bukti pencapaian aktual. Kolom 'PENJELASAN'/'keterangan' di ujung kanan tabel adalah SATU-SATUNYA kolom yang berisi pencapaian AKTUAL proyek ini. Kalau kolom penjelasan untuk suatu kategori KOSONG SEPENUHNYA (tidak ada satu kalimat pun), kategori itu TIDAK diukur/tidak terdampak oleh proyek ini — JANGAN mengarang atau menyimpulkan pencapaian dari angka ambang batas skala pada kolom tengah.
@@ -506,16 +503,16 @@ FAKTA DOKUMEN:
 Evaluasi {len(KATEGORI_IMPACT_14)} kategori impact berikut: {daftar_kategori_str}.
 Untuk setiap kategori, status HARUS salah satu dari: 'IYA' (ada dampak terbukti dengan KETERANGAN/PENJELASAN AKTUAL yang jelas di dokumen — bukan sekadar ambang batas skala penilaian), 'TIDAK' (tidak ada dampak/tidak disebutkan sama sekali, ATAU kolom penjelasan/keterangan untuk kategori itu kosong), atau 'TIDAK YAKIN' (ADA keterangan/penjelasan tapi tidak lengkap/ambigu/tidak cukup data pendukung).
 
-SELAIN itu, tentukan juga 'Jenis Saving' berdasarkan dokumen. Pilihan statusnya adalah: 'Hard Saving' (saving yang real, nilai >100 juta rupiah/tahun, umumnya terkait penurunan pemakaian gas, listrik, air, uji riksa, dan pembelian material seperti RMPM, BBC, BBP), 'Virtual/Soft Saving' (saving yang tidak real / cost avoidance, umumnya terkait material balance, stock akurasi, dan customer complain), 'Keduanya', atau 'Tidak Ada'. 
+SELAIN itu, tentukan juga 'Jenis Saving' berdasarkan dokumen. Pilihan statusnya adalah: 'Hard Saving' (saving finansial nyata >100 juta rupiah/tahun, terkait penurunan pemakaian gas/listrik/air/pembelian material/manpower), 'Virtual/Soft Saving' (saving tidak real, berupa opportunity loss yang dihindari, cost avoidance, material balance/stock akurasi, atau penurunan customer complaint), 'Keduanya', atau 'Tidak Ada'. 
 PENTING: Pada kolom 'keterangan' untuk 'Jenis Saving', WAJIB JELASKAN ALASAN MENGAPA Anda mengkategorikannya sebagai Hard/Soft Saving (misal: 'Dikategorikan Keduanya karena terdapat penurunan pemakaian listrik senilai Rp 150jt (Hard) dan penurunan defect (Soft)'). JANGAN KOSONGKAN keterangan untuk Jenis Saving.
 
 Keluarkan HANYA JSON array valid dengan skema persis:
 [{{"kategori": "Air", "status": "TIDAK", "keterangan": "alasan singkat merujuk dokumen"}}]"""
                 
                 raw_saving_gemini = panggil_ai_dengan_retry(prompt_saving, "Analisis Saving", status_box, config=GENERATION_CONFIG_JSON)
-                raw_saving_gpt = panggil_openai_dengan_retry(prompt_saving, "Analisis Saving", status_box)
+                raw_saving_groq = panggil_groq_dengan_retry(prompt_saving, "Analisis Saving", status_box)
 
-                # --- 8. Feedback Peserta (GEMINI & GPT) ---
+                # --- 8. Feedback Peserta (GEMINI & GROQ) ---
                 prompt_feedback_base = f"""Anda berperan sebagai narasumber pembinaan (coaching) Kaizen yang memberikan umpan balik konstruktif untuk PESERTA kompetisi (bukan untuk juri). Bahasa harus suportif, jelas, mudah dicerna oleh peserta yang levelnya beragam (sebagian belum paham PDCA dengan baik) — kritik boleh tegas dan jujur, tapi disampaikan dengan cara yang mendidik dan tidak menjatuhkan semangat.
 
 Untuk MASING-MASING 6 kategori tetap di bawah, isi 3 kolom: "kekuatan" (apa yang sudah bagus, sebutkan konkret — kalau memang tidak ada yang menonjol, boleh tulis "Belum ada yang menonjol di bagian ini"), "area_perbaikan" (apa yang paling perlu ditingkatkan, jelaskan KENAPA), dan "saran_konkret" (langkah nyata dan actionable yang bisa dilakukan peserta, bukan saran generik).
@@ -540,7 +537,7 @@ Keluarkan HANYA JSON array valid dengan skema persis:
 [{{"kategori": "Struktur & Kejelasan Penulisan", "kekuatan": "...", "area_perbaikan": "...", "saran_konkret": "..."}}]"""
                 
                 raw_feedback_gemini = panggil_ai_dengan_retry(f"{prompt_feedback_base}\n\nAUDIT LOGIKA:\n{raw_alur_gemini}\n\nHASIL SKORING:\n{raw_skoring_gemini}", "Umpan Balik", status_box, config=GENERATION_CONFIG_JSON)
-                raw_feedback_gpt = panggil_openai_dengan_retry(f"{prompt_feedback_base}\n\nAUDIT LOGIKA:\n{raw_alur_gpt}\n\nHASIL SKORING:\n{raw_skoring_gpt}", "Umpan Balik", status_box)
+                raw_feedback_groq = panggil_groq_dengan_retry(f"{prompt_feedback_base}\n\nAUDIT LOGIKA:\n{raw_alur_groq}\n\nHASIL SKORING:\n{raw_skoring_groq}", "Umpan Balik", status_box)
 
                 status_box.update(label="✅ Analisis Agen Ganda Selesai!", state="complete")
 
@@ -548,32 +545,32 @@ Keluarkan HANYA JSON array valid dengan skema persis:
                 st.session_state.df_verifikasi = pd.DataFrame(bersihkan_dan_parse_json(raw_verifikasi))
                 
                 st.session_state.df_alur_gemini = pd.DataFrame(bersihkan_dan_parse_json(raw_alur_gemini))
-                st.session_state.df_alur_gpt = pd.DataFrame(bersihkan_dan_parse_json(raw_alur_gpt))
+                st.session_state.df_alur_groq = pd.DataFrame(bersihkan_dan_parse_json(raw_alur_groq))
                 
                 df_gem, skor_gem = format_tabel_rubrik(bersihkan_dan_parse_json(raw_skoring_gemini))
-                df_gpt, skor_gpt = format_tabel_rubrik(bersihkan_dan_parse_json(raw_skoring_gpt))
+                df_groq, skor_groq = format_tabel_rubrik(bersihkan_dan_parse_json(raw_skoring_groq))
                 st.session_state.df_rubrik_gemini = df_gem
                 st.session_state.total_skor_gemini = skor_gem
-                st.session_state.df_rubrik_gpt = df_gpt
-                st.session_state.total_skor_gpt = skor_gpt
+                st.session_state.df_rubrik_groq = df_groq
+                st.session_state.total_skor_groq = skor_groq
                 
                 st.session_state.df_saving_gemini = pd.DataFrame(bersihkan_dan_parse_json(raw_saving_gemini))
-                st.session_state.df_saving_gpt = pd.DataFrame(bersihkan_dan_parse_json(raw_saving_gpt))
+                st.session_state.df_saving_groq = pd.DataFrame(bersihkan_dan_parse_json(raw_saving_groq))
                 
                 st.session_state.df_feedback_gemini = pd.DataFrame(bersihkan_dan_parse_json(raw_feedback_gemini))
-                st.session_state.df_feedback_gpt = pd.DataFrame(bersihkan_dan_parse_json(raw_feedback_gpt))
+                st.session_state.df_feedback_groq = pd.DataFrame(bersihkan_dan_parse_json(raw_feedback_groq))
 
                 st.session_state.transkrip = [
                     {"Peran": "Ekstraksi & Visual (Gemini Mata)", "Laporan": f"Fakta:\n{laporan_ekstraksi}\n\nVisual:\n{raw_verifikasi}"},
                     {"Peran": "Audit Logika (Gemini)", "Laporan": raw_alur_gemini},
-                    {"Peran": "Audit Logika (GPT)", "Laporan": raw_alur_gpt},
+                    {"Peran": "Audit Logika (Groq Llama)", "Laporan": raw_alur_groq},
                     {"Peran": "Tinjauan Kritis & Konfirmatif", "Laporan": f"Kritik:\n{temuan_analisis_kritis}\n\nBantahan:\n{temuan_analisis_konfirmatif}"},
                     {"Peran": "Skoring (Gemini)", "Laporan": raw_skoring_gemini},
-                    {"Peran": "Skoring (GPT)", "Laporan": raw_skoring_gpt},
+                    {"Peran": "Skoring (Groq Llama)", "Laporan": raw_skoring_groq},
                     {"Peran": "Saving (Gemini)", "Laporan": raw_saving_gemini},
-                    {"Peran": "Saving (GPT)", "Laporan": raw_saving_gpt},
+                    {"Peran": "Saving (Groq Llama)", "Laporan": raw_saving_groq},
                     {"Peran": "Feedback (Gemini)", "Laporan": raw_feedback_gemini},
-                    {"Peran": "Feedback (GPT)", "Laporan": raw_feedback_gpt},
+                    {"Peran": "Feedback (Groq Llama)", "Laporan": raw_feedback_groq},
                 ]
                 st.session_state.proses_selesai = True
                 st.rerun()
@@ -594,36 +591,36 @@ Keluarkan HANYA JSON array valid dengan skema persis:
 # 5. HASIL PENILAIAN & UI TAB BERSANDING
 # ==========================================
 if st.session_state.proses_selesai:
-    st.success("Analisis Dual-AI selesai! Silakan bandingkan penalaran Gemini dan GPT di bawah ini.")
+    st.success("Analisis Dual-AI selesai! Silakan bandingkan penalaran Gemini dan Groq Llama 3 di bawah ini.")
 
     st.subheader("🔍 1. Fakta Observasi: Verifikasi Kelayakan, 5W1H & FUP")
     st.caption("Fakta dasar yang diekstrak oleh Gemini (sebagai Mata) dan disetujui bersama oleh kedua AI.")
     st.data_editor(st.session_state.df_verifikasi, num_rows="dynamic", use_container_width=True)
 
     st.subheader("🔗 2. Audit Konsistensi Metodologi PDCA (Golden Thread)")
-    tab_alur_gemini, tab_alur_gpt = st.tabs(["🤖 Evaluasi GEMINI", "🧠 Evaluasi GPT"])
+    tab_alur_gemini, tab_alur_groq = st.tabs(["🤖 Evaluasi GEMINI", "🦙 Evaluasi GROQ LLAMA 3"])
     with tab_alur_gemini: st.data_editor(st.session_state.df_alur_gemini, num_rows="dynamic", use_container_width=True, key="tbl_alur_gemini")
-    with tab_alur_gpt: st.data_editor(st.session_state.df_alur_gpt, num_rows="dynamic", use_container_width=True, key="tbl_alur_gpt")
+    with tab_alur_groq: st.data_editor(st.session_state.df_alur_groq, num_rows="dynamic", use_container_width=True, key="tbl_alur_groq")
 
     st.subheader("📝 3. Tabel Validasi Rubrik (Keputusan Akhir)")
     st.caption("Manajer/Juri bertindak sebagai Hakim. Silakan sesuaikan kolom **skor** setelah mempertimbangkan debat argumen dari kedua AI.")
-    tab_rub_gemini, tab_rub_gpt = st.tabs(["🤖 Skoring GEMINI", "🧠 Skoring GPT"])
+    tab_rub_gemini, tab_rub_groq = st.tabs(["🤖 Skoring GEMINI", "🦙 Skoring GROQ LLAMA 3"])
     with tab_rub_gemini:
         st.metric("Total Skor Rubrik (Gemini)", f"{st.session_state.total_skor_gemini:.0f}")
         edited_rubrik_gemini = st.data_editor(st.session_state.df_rubrik_gemini, num_rows="dynamic", use_container_width=True, key="tbl_rubrik_gemini")
-    with tab_rub_gpt:
-        st.metric("Total Skor Rubrik (GPT)", f"{st.session_state.total_skor_gpt:.0f}")
-        edited_rubrik_gpt = st.data_editor(st.session_state.df_rubrik_gpt, num_rows="dynamic", use_container_width=True, key="tbl_rubrik_gpt")
+    with tab_rub_groq:
+        st.metric("Total Skor Rubrik (Groq Llama)", f"{st.session_state.total_skor_groq:.0f}")
+        edited_rubrik_groq = st.data_editor(st.session_state.df_rubrik_groq, num_rows="dynamic", use_container_width=True, key="tbl_rubrik_groq")
 
     st.subheader("💰 4. Tabel Validasi Impact & Saving (14 Kategori)")
-    tab_sav_gemini, tab_sav_gpt = st.tabs(["🤖 Analisis Saving GEMINI", "🧠 Analisis Saving GPT"])
+    tab_sav_gemini, tab_sav_groq = st.tabs(["🤖 Analisis Saving GEMINI", "🦙 Analisis Saving GROQ LLAMA 3"])
     with tab_sav_gemini: st.data_editor(st.session_state.df_saving_gemini, num_rows="dynamic", use_container_width=True, key="tbl_saving_gemini")
-    with tab_sav_gpt: st.data_editor(st.session_state.df_saving_gpt, num_rows="dynamic", use_container_width=True, key="tbl_saving_gpt")
+    with tab_sav_groq: st.data_editor(st.session_state.df_saving_groq, num_rows="dynamic", use_container_width=True, key="tbl_saving_groq")
 
     st.subheader("💬 5. Feedback & Saran untuk Peserta")
-    tab_feed_gemini, tab_feed_gpt = st.tabs(["🤖 Saran GEMINI", "🧠 Saran GPT"])
+    tab_feed_gemini, tab_feed_groq = st.tabs(["🤖 Saran GEMINI", "🦙 Saran GROQ LLAMA 3"])
     with tab_feed_gemini: st.data_editor(st.session_state.df_feedback_gemini, num_rows="dynamic", use_container_width=True, key="tbl_feed_gemini")
-    with tab_feed_gpt: st.data_editor(st.session_state.df_feedback_gpt, num_rows="dynamic", use_container_width=True, key="tbl_feed_gpt")
+    with tab_feed_groq: st.data_editor(st.session_state.df_feedback_groq, num_rows="dynamic", use_container_width=True, key="tbl_feed_groq")
 
     with st.expander("📜 Lihat Transkrip Lengkap"):
         for entri in st.session_state.transkrip:
@@ -638,20 +635,20 @@ if st.session_state.proses_selesai:
             st.session_state.df_verifikasi.to_excel(writer, sheet_name="1. Verifikasi Visual", index=False)
         if not st.session_state.df_alur_gemini.empty:
             st.session_state.df_alur_gemini.to_excel(writer, sheet_name="2. Alur Logika (Gemini)", index=False)
-        if not st.session_state.df_alur_gpt.empty:
-            st.session_state.df_alur_gpt.to_excel(writer, sheet_name="2. Alur Logika (GPT)", index=False)
+        if not st.session_state.df_alur_groq.empty:
+            st.session_state.df_alur_groq.to_excel(writer, sheet_name="2. Alur Logika (Groq)", index=False)
         if not edited_rubrik_gemini.empty:
             edited_rubrik_gemini.to_excel(writer, sheet_name="3. Rubrik (Gemini)", index=False)
-        if not edited_rubrik_gpt.empty:
-            edited_rubrik_gpt.to_excel(writer, sheet_name="3. Rubrik (GPT)", index=False)
+        if not edited_rubrik_groq.empty:
+            edited_rubrik_groq.to_excel(writer, sheet_name="3. Rubrik (Groq)", index=False)
         if not st.session_state.df_saving_gemini.empty:
             st.session_state.df_saving_gemini.to_excel(writer, sheet_name="4. Saving (Gemini)", index=False)
-        if not st.session_state.df_saving_gpt.empty:
-            st.session_state.df_saving_gpt.to_excel(writer, sheet_name="4. Saving (GPT)", index=False)
+        if not st.session_state.df_saving_groq.empty:
+            st.session_state.df_saving_groq.to_excel(writer, sheet_name="4. Saving (Groq)", index=False)
         if not st.session_state.df_feedback_gemini.empty:
             st.session_state.df_feedback_gemini.to_excel(writer, sheet_name="5. Feedback (Gemini)", index=False)
-        if not st.session_state.df_feedback_gpt.empty:
-            st.session_state.df_feedback_gpt.to_excel(writer, sheet_name="5. Feedback (GPT)", index=False)
+        if not st.session_state.df_feedback_groq.empty:
+            st.session_state.df_feedback_groq.to_excel(writer, sheet_name="5. Feedback (Groq)", index=False)
 
     excel_data = output.getvalue()
 
