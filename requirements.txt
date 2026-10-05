@@ -1,7 +1,5 @@
 streamlit
 pandas
 google-genai
-openpyxl
-XlsxWriter
-openai
-PyMuPDF
+groq
+xlsxwriter
