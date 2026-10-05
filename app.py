@@ -88,7 +88,6 @@ except Exception as e:
     st.stop()
 
 MODEL_GEMINI = "gemini-3.5-flash-lite"
-# Menggunakan Llama 3.3 70B Versatile dari Groq untuk reasoning tinggi & memori besar
 MODEL_GROQ = "llama-3.3-70b-versatile"
 
 GENERATION_CONFIG_TEXT = types.GenerateContentConfig(
@@ -201,8 +200,6 @@ def panggil_ai_dengan_retry(contents, deskripsi_agen, log_ui, config=None, maksi
     return ""
 
 def panggil_groq_dengan_retry(prompt_text, deskripsi_agen, log_ui, maksimal_percobaan=3):
-    # Groq sangat cepat dan rate limit gratisnya cukup longgar (umumnya 30 RPM).
-    # Jeda tidur dikurangi drastis menjadi hanya 2 detik.
     for percobaan in range(maksimal_percobaan):
         try:
             log_ui.write(f"⏳ **{deskripsi_agen} (Groq Llama 3):** Sedang mengevaluasi super cepat...")
@@ -216,7 +213,7 @@ def panggil_groq_dengan_retry(prompt_text, deskripsi_agen, log_ui, maksimal_perc
             )
             teks_hasil = response.choices[0].message.content
             log_ui.write(f"✅ **{deskripsi_agen} (Groq Llama 3):** Selesai dalam sekejap!")
-            time.sleep(2) # Jeda ringan
+            time.sleep(2)
             return teks_hasil
         except Exception as e:
             if "429" in str(e):
@@ -229,11 +226,9 @@ def panggil_groq_dengan_retry(prompt_text, deskripsi_agen, log_ui, maksimal_perc
 
 def bersihkan_dan_parse_json(teks_raw):
     if not teks_raw: return []
-    # Groq Llama kadang masih menyisipkan markdown ```json meskipun dilarang
     teks_bersih = re.sub(r"```json", "", teks_raw, flags=re.IGNORECASE)
     teks_bersih = re.sub(r"```", "", teks_bersih).strip()
     
-    # Kadang model merespon dengan teks sebelum array '['
     start_idx = teks_bersih.find('[')
     end_idx = teks_bersih.rfind(']')
     
@@ -312,7 +307,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
                     tmp.write(uploaded_file.getbuffer())
                     temp_path = tmp.name
 
-                status_box.write("☁️ Mengunggah berkas ke Google AI Server...")
+                status_box.write("☁️️ Mengunggah berkas ke Google AI Server...")
                 gemini_file = client_gemini.files.upload(file=temp_path)
                 while gemini_file.state.name in ["PROCESSING", "PENDING"]:
                     time.sleep(4)
@@ -350,8 +345,9 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
                     "Apakah dokumen ini benar-benar proyek continuous improvement yang valid? Tanda-tanda TIDAK LAYAK: tidak ada kondisi awal/masalah yang didefinisikan dengan jelas, tidak ada perubahan before-after yang nyata, tidak ada analisis akar masalah sama sekali (langsung lompat ke solusi), atau isinya sebenarnya laporan administratif/aktivitas rutin yang dipaksakan ke format Kaizen. Beri verdict: 'LAYAK' (jelas proyek improvement yang sah), 'PERLU PERHATIAN' (ada keraguan, perlu ditinjau juri), atau 'TIDAK LAYAK' (bukan proyek improvement).\n\n"
                     "## B. KEBENARAN SEMANTIK 5W1H\n"
                     "Untuk MASING-MASING elemen (What, Where, When, Who, Why, How — atau elemen serupa yang dipakai dokumen), periksa apakah ISI yang dituliskan benar-benar menjawab pertanyaan elemen itu, bukan cuma ada teks di kolomnya. Contoh kesalahan yang harus ditangkap: isi kolom 'How' sebenarnya menjelaskan 'Where' (lokasi), atau isi 'Which'/kolom lain tertukar dengan elemen lain. Tandai tiap elemen SESUAI atau TERTUKAR/TIDAK SESUAI dengan penjelasan spesifik.\n\n"
-                    "## C. AUDIT FOTO & BUKTI VISUAL\n"
-                    "Untuk SETIAP foto/gambar/diagram penting yang kamu lihat di dokumen (terutama foto before/after, dan diagram fishbone/flow), deskripsikan singkat apa yang benar-benar terlihat di foto itu, lalu bandingkan dengan klaim teks di sekitarnya. Tandai SESUAI kalau foto benar-benar mendukung klaim (misal foto 'before' menunjukkan kondisi rusak/bermasalah yang dideskripsikan, foto 'after' menunjukkan perbaikan yang sama), atau MERAGUKAN kalau foto tidak jelas mendukung klaim, tidak relevan, tampak diambil dari konteks lain, atau foto before/after terlihat identik/tidak menunjukkan perubahan nyata.\n\n"
+                    "## C. AUDIT FOTO & BUKTI VISUAL (ANTI-MANIPULASI)\n"
+                    "Untuk SETIAP foto/gambar/diagram penting yang kamu lihat di dokumen (terutama foto before/after, dan diagram fishbone/flow), deskripsikan singkat apa yang benar-benar terlihat di foto itu. \n"
+                    "KRITIKAL: Cek dengan sangat teliti apakah foto 'Before' dan 'After' sebenarnya adalah foto yang sama persis namun hanya diubah sudut pandangnya (angle), di-zoom, atau di-crop tanpa ada perubahan fisik yang nyata! Tandai SESUAI kalau foto benar-benar menunjukkan perbaikan/perubahan nyata sesuai klaim, atau MERAGUKAN kalau foto before/after terlihat identik (indikasi rekayasa), tidak relevan, atau tampak diambil dari konteks lain.\n\n"
                     "## D. AUDIT KELENGKAPAN FORM USULAN PERBAIKAN (FUP)\n"
                     "Cari secara spesifik dokumen/halaman yang diklaim sebagai Form Usulan Perbaikan (FUP). Dokumen FUP yang sah HARUS memenuhi syarat visual berikut:\n"
                     "1. Memiliki Kop Surat perusahaan resmi.\n"
@@ -359,7 +355,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
                     "3. Terdapat kolom tanda tangan persetujuan (Approval) yang SUDAH DITANDATANGANI.\n"
                     "JANGAN menganggap form standardisasi (OPL/IK/SOP) atau daftar hadir sosialisasi sebagai FUP. Tandai status sebagai 'ADA DAN APPROVED' (jika ada form FUP dan sudah di-acc), 'ADA TAPI BELUM APPROVED' (jika ada form FUP tapi kolom tanda tangan kosong/belum lengkap), atau 'TIDAK DITEMUKAN / SALAH DOKUMEN' (jika yang dilampirkan adalah dokumen lain seperti OPL/SOP atau tidak ada sama sekali).\n\n"
                     "Keluarkan HANYA JSON array valid (satu array datar berisi semua temuan A+B+C+D, dibedakan lewat field 'kategori'), dengan skema persis:\n"
-                    '[{"kategori": "GATE CHECK", "item": "Kelayakan Proyek Improvement", "status": "LAYAK", "catatan": "alasan spesifik merujuk isi dokumen"}, {"kategori": "5W1H", "item": "How", "status": "TERTUKAR/TIDAK SESUAI", "catatan": "isi kolom How sebenarnya menjelaskan lokasi (Where), bukan metode"}, {"kategori": "FOTO", "item": "Foto halaman 8 (before)", "status": "SESUAI", "catatan": "menunjukkan kondisi mesin sesuai deskripsi masalah"}, {"kategori": "FUP", "item": "Form Usulan Perbaikan", "status": "TIDAK DITEMUKAN / SALAH DOKUMEN", "catatan": "yang dilampirkan adalah form OPL, bukan FUP resmi"}]'
+                    '[{"kategori": "GATE CHECK", "item": "Kelayakan Proyek Improvement", "status": "LAYAK", "catatan": "alasan spesifik merujuk isi dokumen"}, {"kategori": "5W1H", "item": "How", "status": "TERTUKAR/TIDAK SESUAI", "catatan": "isi kolom How sebenarnya menjelaskan lokasi (Where), bukan metode"}, {"kategori": "FOTO", "item": "Foto halaman 8 (before)", "status": "MERAGUKAN", "catatan": "foto before dan after terlihat seperti foto yang sama hanya di-zoom"}, {"kategori": "FUP", "item": "Form Usulan Perbaikan", "status": "TIDAK DITEMUKAN / SALAH DOKUMEN", "catatan": "yang dilampirkan adalah form OPL, bukan FUP resmi"}]'
                 )
                 raw_verifikasi = panggil_ai_dengan_retry([gemini_file, prompt_verifikasi], "Verifikasi Visual & FUP", status_box, config=GENERATION_CONFIG_JSON)
 
@@ -394,8 +390,8 @@ D3. "Status FUP ke Klaim Implementasi": kalau FUP belum disetujui/approved, apak
 D4. "Rencana ke Bukti Pelaksanaan": apakah dokumentasi pelaksanaan (foto, laporan trial) menunjukkan PERSIS action plan yang direncanakan, bukan sesuatu yang berbeda?
 
 ## FASE CHECK (C1-C2)
-C1. "Metodologi Pengukuran Awal vs Akhir": apakah cara mengukur hasil akhir SEPADAN/comparable dengan cara mengukur kondisi awal (satuan sama, periode sepadan, cara hitung sama — apple-to-apple)? Sebutkan kalau ada ketidaksepadanan (misal baseline diukur 3 bulan tapi hasil cuma diukur 2 minggu).
-C2. "Target Awal ke Hasil Akhir": apakah angka target awal benar-benar dijawab hasil akhir yang dilaporkan (eksplisit maupun implisit), tanpa pergeseran target yang tidak dijelaskan?
+C1. "Metodologi & SCOPE Pengukuran Awal vs Akhir": KRITIKAL: Periksa apakah cara mengukur DAN SKALA/SCOPE hasil akhir SEPADAN dengan kondisi awal! (Misal: Jika masalah awal & targetnya adalah "Mesin A", maka hasil akhirnya juga harus untuk "Mesin A". Jika hasil akhir diklaim untuk "Seluruh Pabrik" padahal target hanya 1 mesin, ini manipulasi data dan WAJIB ditandai TIDAK KONSISTEN/LEMAH).
+C2. "Target Awal ke Hasil Akhir": apakah angka target awal benar-benar dijawab hasil akhir yang dilaporkan secara spesifik, tanpa pergeseran target yang tidak dijelaskan?
 
 ## FASE ACT (A1-A4)
 A1. "Action Plan Efektif ke Standardisasi": apakah dokumen standar (SOP/IK/OPL/dst) yang dibuat memang RELEVAN dan mengunci action plan spesifik itu (bukan dokumen standar generik yang tidak nyambung)?
@@ -403,7 +399,7 @@ A2. "Standardisasi ke Validasi/Approval": apakah standar yang disosialisasikan (
 A3. "Sosialisasi ke Sasaran yang Tepat": apakah pihak yang mengikuti sosialisasi (dari bukti absensi) memang pihak yang relevan/terlibat di area masalah (sesuai Who/PIC di 5W1H)? Gunakan tanggal AKTUAL pelaksanaan sosialisasi (bukan tanggal berlaku template formulir) kalau relevan untuk memeriksa urutan waktu.
 A4. "Standardisasi/Action Plan ke Kelayakan Replikasi": apakah area/mesin yang diklaim direplikasi punya karakteristik yang sepadan/sejenis dengan area asal masalah (sehingga replikasi itu masuk akal secara teknis), bukan cuma diklaim "direplikasi" tanpa penjelasan kesesuaian?
 
-Untuk tiap titik, beri verdict SALAH SATU dari: "KONSISTEN" (jelas dan masuk akal, didukung angka/isi konkret), "LEMAH" (ada tapi kurang detail/agak dipaksakan/tidak ada angka jelas, atau root cause masih bersifat "potensi"), atau "TIDAK KONSISTEN" (ada loncatan logika/tidak nyambung/tidak ditemukan).
+Untuk tiap titik, beri verdict SALAH SATU dari: "KONSISTEN" (jelas dan masuk akal, didukung angka/isi konkret), "LEMAH" (ada tapi kurang detail/agak dipaksakan/tidak ada angka jelas, atau root cause masih bersifat "potensi"), atau "TIDAK KONSISTEN" (ada loncatan logika/manipulasi scope/tidak nyambung/tidak ditemukan).
 
 Keluarkan HANYA JSON array valid dengan skema persis (field "fase" WAJIB salah satu dari "PLAN", "DO", "CHECK", "ACT"):
 [{{"no": "P1", "fase": "PLAN", "tahap": "5G ke 5W1H", "verdict": "KONSISTEN", "temuan": "penjelasan spesifik merujuk isi dan angka konkret dari dokumen, sebutkan halaman DAN isinya"}}]"""
@@ -418,7 +414,7 @@ Keluarkan HANYA JSON array valid dengan skema persis (field "fase" WAJIB salah s
                     f"HASIL AUDIT KONSISTENSI METODOLOGI PDCA:\n{raw_alur_gemini}\n\n"
                     "Periksa dan pertanyakan secara spesifik, dengan mengacu ke hasil audit di atas:\n"
                     "- Titik mana saja (di fase manapun) yang berstatus 'LEMAH' atau 'TIDAK KONSISTEN' — jelaskan isi temuannya dan kenapa itu masalah serius untuk kredibilitas penilaian.\n"
-                    "- Kelemahan bukti, celah antara masalah dan solusi, kurangnya data pendukung, atau potensi manipulasi angka saving.\n\n"
+                    "- Kelemahan bukti, celah antara masalah dan solusi, kurangnya data pendukung, manipulasi scope (target 1 mesin vs hasil 1 pabrik), atau potensi manipulasi angka saving.\n\n"
                     "Sertakan alasan yang merujuk ke fakta di atas untuk tiap temuan."
                 )
                 temuan_analisis_kritis = panggil_ai_dengan_retry(prompt_2, "Analisis Kritis", status_box)
@@ -450,7 +446,7 @@ ATURAN PENILAIAN:
   * Kriteria 11 (Action Plan & PIC) & 12 (Rencana Perbaikan): pakai titik D1 dan D2.
   * Kriteria 13 (FUP): Berdasarkan aturan IMS Perusahaan, FUP (Form Usulan Perbaikan) ADALAH MUTLAK WAJIB untuk SEMUA jenis project improvement tanpa terkecuali, sebagai alat identifikasi risiko tersembunyi. JANGAN PERNAH memberikan skor 5 jika dokumen FUP yang sah (hasil Verifikasi Visual D: ada kop surat, judul FUP, dan sudah ditandatangani/approved) tidak dilampirkan, meskipun action plan sudah berjalan atau ada dokumen OPL/Sosialisasi. Jika tidak ada bukti FUP yang sah, SKOR WAJIB NOL (0).
   * Kriteria 14 (Pelaksanaan): pakai titik D4.
-  * Kriteria 16 (Pencapaian Target): pakai titik C1 dan C2 BERSAMA — kalau metodologi pengukuran (C1) tidak sepadan, skor WAJIB ikut turun meski angkanya kelihatan mencapai target.
+  * Kriteria 16 (Pencapaian Target): pakai titik C1 dan C2 BERSAMA — kalau metodologi pengukuran atau SCOPE/SKALA target vs hasil (C1) tidak sepadan (misal target 1 mesin diklaim hasil 1 pabrik), skor WAJIB diturunkan drastis meski angkanya kelihatan mencapai target.
   * Kriteria 17 (Pengecekan Hasil): pakai titik C1.
   * Kriteria 18 (Standardisasi) & 19 (Validasi): pakai titik A1 dan A2.
   * Kriteria 20 (Sosialisasi): pakai titik A3.
@@ -504,7 +500,8 @@ Evaluasi {len(KATEGORI_IMPACT_14)} kategori impact berikut: {daftar_kategori_str
 Untuk setiap kategori, status HARUS salah satu dari: 'IYA' (ada dampak terbukti dengan KETERANGAN/PENJELASAN AKTUAL yang jelas di dokumen — bukan sekadar ambang batas skala penilaian), 'TIDAK' (tidak ada dampak/tidak disebutkan sama sekali, ATAU kolom penjelasan/keterangan untuk kategori itu kosong), atau 'TIDAK YAKIN' (ADA keterangan/penjelasan tapi tidak lengkap/ambigu/tidak cukup data pendukung).
 
 SELAIN itu, tentukan juga 'Jenis Saving' berdasarkan dokumen. Pilihan statusnya adalah: 'Hard Saving' (saving finansial nyata >100 juta rupiah/tahun, terkait penurunan pemakaian gas/listrik/air/pembelian material/manpower), 'Virtual/Soft Saving' (saving tidak real, berupa opportunity loss yang dihindari, cost avoidance, material balance/stock akurasi, atau penurunan customer complaint), 'Keduanya', atau 'Tidak Ada'. 
-PENTING: Pada kolom 'keterangan' untuk 'Jenis Saving', WAJIB JELASKAN ALASAN MENGAPA Anda mengkategorikannya sebagai Hard/Soft Saving (misal: 'Dikategorikan Keduanya karena terdapat penurunan pemakaian listrik senilai Rp 150jt (Hard) dan penurunan defect (Soft)'). JANGAN KOSONGKAN keterangan untuk Jenis Saving.
+PENTING ANTI-MANIPULASI: Anda DILARANG KERAS melabeli 'Hard Saving' jika dokumen HANYA MENCANTUMKAN ANGKA TOTAL (misal 'Saving Rp 200 Juta') tanpa ada rincian perhitungan atau parameter sebelum/sesudah yang jelas. Jika tidak ada rincian yang valid, turunkan statusnya menjadi 'Tidak Yakin' atau 'Virtual/Soft Saving'.
+WAJIB JELASKAN ALASAN MENGAPA Anda mengkategorikannya sebagai Hard/Soft Saving di kolom keterangan. JANGAN KOSONGKAN keterangan untuk Jenis Saving.
 
 Keluarkan HANYA JSON array valid dengan skema persis:
 [{{"kategori": "Air", "status": "TIDAK", "keterangan": "alasan singkat merujuk dokumen"}}]"""
@@ -520,9 +517,9 @@ Untuk MASING-MASING 6 kategori tetap di bawah, isi 3 kolom: "kekuatan" (apa yang
 6 KATEGORI TETAP:
 1. "Struktur & Kejelasan Penulisan" — organisasi paper, ada tidaknya typo/salah ketik yang mengganggu, konsistensi format/penomoran, kejelasan bahasa (rujuk temuan kualitas penulisan dari hasil ekstraksi bila ada; JANGAN mengangkat tanggal berlaku template dokumen kontrol sebagai contoh kesalahan penulisan).
 2. "Perumusan Problem Statement" — apakah masalah dirumuskan dengan jelas, spesifik, dan didukung data (bukan cuma opini/dugaan).
-3. "Kesesuaian Goal/Target dengan Objective Awal" — apakah target yang ditetapkan di awal benar-benar terjawab oleh hasil akhir, dan apakah target itu sendiri masuk akal/berdasar data.
+3. "Kesesuaian Goal/Target dengan Objective Awal" — apakah target yang ditetapkan di awal benar-benar terjawab oleh hasil akhir, dan apakah target itu sendiri masuk akal/berdasar data. (Tegur keras jika ada manipulasi scope/skala hasil akhir).
 4. "Kedalaman Analisis Akar Masalah" — kualitas fishbone dan why-why analysis: apakah benar-benar sampai ke akar masalah teknis, atau masih berupa tebakan/potensi tanpa uji coba (rujuk evaluasi kriteria 10/P7).
-5. "Kekuatan Bukti & Data Pendukung" — apakah klaim-klaim (masalah, hasil, saving) didukung data/foto yang jelas dan measurement yang konkret, atau banyak yang cuma klaim tanpa bukti.
+5. "Kekuatan Bukti & Data Pendukung" — apakah klaim-klaim (masalah, hasil, saving) didukung data/foto yang jelas (bukan foto before-after yang dimanipulasi) dan measurement yang konkret, atau banyak yang cuma klaim tanpa bukti.
 6. "Standardisasi & Keberlanjutan" — apakah perbaikan ini benar-benar dikunci supaya tidak terulang (SOP/standar) dan kelengkapan dokumen FUP (rujuk jika peserta gagal melampirkan FUP resmi).
 
 Setelah 6 kategori tetap itu, BOLEH tambahkan 0-2 baris tambahan dengan kategori "Catatan Tambahan" untuk temuan penting lain yang tidak masuk 6 kategori di atas (kalau memang ada yang signifikan; kalau tidak ada, tidak usah dipaksakan).
