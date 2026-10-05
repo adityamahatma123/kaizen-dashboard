@@ -68,8 +68,8 @@ st.markdown(
 
 st.title("🏢 Portal Validasi Kaizen (Dual-AI Judge)")
 st.markdown(
-    "<p style='text-align: center; color: #7F8C8D; font-size: 1.1rem; font-weight: 400; margin-bottom: 2rem;'>Unggah"
-    " dokumen evaluasi, bandingkan analisis Gemini vs Llama-3 (Groq) secara <i>apple-to-apple</i>, lalu lakukan validasi akhir secara manual.</p>",
+    "<p style='text-align: center; color: #7F8C8D; font-size: 1.1rem; font-weight: 400; margin-bottom: 2rem;'>Muat naik"
+    " dokumen evaluasi, bandingkan analisis Gemini vs Groq secara <i>apple-to-apple</i>, lalu lakukan validasi akhir secara manual.</p>",
     unsafe_allow_html=True,
 )
 st.divider()
@@ -187,66 +187,74 @@ def panggil_ai_dengan_retry(contents, deskripsi_agen, log_ui, config=None, maksi
             if not teks_hasil:
                 time.sleep(8)
                 continue
-            log_ui.write(f"✅ **{deskripsi_agen} (Gemini):** Selesai! Pendinginan 15 detik...")
+            log_ui.write(f"✅ **{deskripsi_agen} (Gemini):** Selesai! Pendinginan 15 saat...")
             time.sleep(15)
             return teks_hasil
         except Exception as e:
             if "429" in str(e).upper() or "RESOURCE_EXHAUSTED" in str(e).upper():
-                log_ui.write(f"⚠️ **Gemini:** Kena limit rate. Menunggu 65 detik...")
+                log_ui.write(f"⚠️ **Gemini:** Limit rate. Menunggu 65 saat...")
                 time.sleep(65)
             else:
-                log_ui.write(f"⚠️ **Gemini:** Error: {e}. Mencoba ulang...")
+                log_ui.write(f"⚠️ **Gemini:** Error: {e}. Mencuba semula...")
                 time.sleep(10)
     return ""
 
 def panggil_groq_dengan_retry(prompt_text, deskripsi_agen, log_ui, maksimal_percobaan=3):
     for percobaan in range(maksimal_percobaan):
         try:
-            log_ui.write(f"⏳ **{deskripsi_agen} (Groq Llama 3):** Sedang mengevaluasi super cepat...")
+            log_ui.write(f"⏳ **{deskripsi_agen} (Groq):** Sedang mengevaluasi pantas...")
             response = client_groq.chat.completions.create(
                 model=MODEL_GROQ,
                 messages=[
-                    {"role": "system", "content": "Anda adalah asisten auditor Kaizen tingkat senior. Wajib merespons HANYA dengan format JSON Array valid (dimulai dengan [ dan diakhiri dengan ]), tanpa teks markdown tambahan."},
+                    {"role": "system", "content": "Anda adalah asisten auditor Kaizen tingkat senior. ANDA WAJIB MENGELUARKAN OUTPUT DALAM BENTUK JSON ARRAY SAHAJA (dimulai dengan [ dan diakhiri dengan ]). DILARANG KERAS menambah sebarang teks pengantar, penutup, atau tanda markdown. Hanya JSON tulen."},
                     {"role": "user", "content": prompt_text}
                 ],
                 temperature=0.2
             )
             teks_hasil = response.choices[0].message.content
-            log_ui.write(f"✅ **{deskripsi_agen} (Groq Llama 3):** Selesai dalam sekejap!")
+            log_ui.write(f"✅ **{deskripsi_agen} (Groq):** Selesai dalam sekelip mata!")
             time.sleep(2)
             return teks_hasil
         except Exception as e:
             if "429" in str(e):
-                log_ui.write(f"⚠️ **Groq:** Limit tercapai. Menunggu 10 detik...")
+                log_ui.write(f"⚠️ **Groq:** Limit tercapai. Menunggu 10 saat...")
                 time.sleep(10)
             else:
-                log_ui.write(f"⚠️ **Groq:** Error: {e}. Mencoba ulang...")
+                log_ui.write(f"⚠️ **Groq:** Ralat: {e}. Mencuba semula...")
                 time.sleep(5)
     return ""
 
 def bersihkan_dan_parse_json(teks_raw):
+    """Pengecaman JSON yang lebih agresif (Anti-Ralat/Kosong)"""
     if not teks_raw: return []
+    
+    # 1. Buang elemen markdown kotor jika ada
     teks_bersih = re.sub(r"```json", "", teks_raw, flags=re.IGNORECASE)
     teks_bersih = re.sub(r"```", "", teks_bersih).strip()
     
-    start_idx = teks_bersih.find('[')
-    end_idx = teks_bersih.rfind(']')
-    
-    if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
-        teks_array = teks_bersih[start_idx:end_idx+1]
+    # 2. Cari secara agresif pola Array [ ... ]
+    match_array = re.search(r'\[(.*)\]', teks_bersih, re.DOTALL)
+    if match_array:
         try:
-            return json.loads(teks_array)
+            return json.loads(match_array.group(0))
         except json.JSONDecodeError:
             pass
 
-    try:
-        data = json.loads(teks_bersih)
-        if isinstance(data, dict):
+    # 3. Cari pola Objek { ... } sebagai sandaran, sekiranya AI membungkusnya
+    match_dict = re.search(r'\{(.*)\}', teks_bersih, re.DOTALL)
+    if match_dict:
+        try:
+            data = json.loads(match_dict.group(0))
             for _key, value in data.items():
                 if isinstance(value, list): return value
             return [data]
-        return data if isinstance(data, list) else []
-    except json.JSONDecodeError:
+        except json.JSONDecodeError:
+            pass
+            
+    # 4. Cuba parse apa adanya sebagai benteng terakhir
+    try:
+        return json.loads(teks_bersih)
+    except Exception:
         pass
         
     return []
@@ -291,23 +299,23 @@ def format_tabel_rubrik(json_data):
 # ==========================================
 # 4. ALUR UNGGAH & EKSEKUSI MULTI-AGENT
 # ==========================================
-uploaded_file = st.file_uploader("Pilih file PDF Kaizen", type="pdf")
+uploaded_file = st.file_uploader("Pilih fail PDF Kaizen", type="pdf")
 
 if uploaded_file is not None and not st.session_state.proses_selesai:
-    if st.button("🚀 Mulai Penilaian AI (Gemini + Groq)"):
+    if st.button("🚀 Mulakan Penilaian AI (Gemini + Groq)"):
         st.session_state.nama_file = uploaded_file.name
 
-        with st.status("🤖 AI Multi-Agent sedang bekerja...", expanded=True) as status_box:
+        with st.status("🤖 AI Multi-Agent sedang memproses...", expanded=True) as status_box:
             suffix = os.path.splitext(uploaded_file.name)[1] or ".pdf"
             temp_path = None
             gemini_file = None
             try:
-                status_box.write("📄 Membaca berkas PDF...")
+                status_box.write("📄 Membaca fail PDF...")
                 with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                     tmp.write(uploaded_file.getbuffer())
                     temp_path = tmp.name
 
-                status_box.write("☁️️ Mengunggah berkas ke Google AI Server...")
+                status_box.write("☁ Memuat naik ke Google AI Server...")
                 gemini_file = client_gemini.files.upload(file=temp_path)
                 while gemini_file.state.name in ["PROCESSING", "PENDING"]:
                     time.sleep(4)
@@ -560,21 +568,21 @@ Keluarkan HANYA JSON array valid dengan skema persis:
                 st.session_state.transkrip = [
                     {"Peran": "Ekstraksi & Visual (Gemini Mata)", "Laporan": f"Fakta:\n{laporan_ekstraksi}\n\nVisual:\n{raw_verifikasi}"},
                     {"Peran": "Audit Logika (Gemini)", "Laporan": raw_alur_gemini},
-                    {"Peran": "Audit Logika (Groq Llama)", "Laporan": raw_alur_groq},
+                    {"Peran": "Audit Logika (Groq)", "Laporan": raw_alur_groq},
                     {"Peran": "Tinjauan Kritis & Konfirmatif", "Laporan": f"Kritik:\n{temuan_analisis_kritis}\n\nBantahan:\n{temuan_analisis_konfirmatif}"},
                     {"Peran": "Skoring (Gemini)", "Laporan": raw_skoring_gemini},
-                    {"Peran": "Skoring (Groq Llama)", "Laporan": raw_skoring_groq},
+                    {"Peran": "Skoring (Groq)", "Laporan": raw_skoring_groq},
                     {"Peran": "Saving (Gemini)", "Laporan": raw_saving_gemini},
-                    {"Peran": "Saving (Groq Llama)", "Laporan": raw_saving_groq},
+                    {"Peran": "Saving (Groq)", "Laporan": raw_saving_groq},
                     {"Peran": "Feedback (Gemini)", "Laporan": raw_feedback_gemini},
-                    {"Peran": "Feedback (Groq Llama)", "Laporan": raw_feedback_groq},
+                    {"Peran": "Feedback (Groq)", "Laporan": raw_feedback_groq},
                 ]
                 st.session_state.proses_selesai = True
                 st.rerun()
 
             except Exception as e:
                 status_box.update(label="❌ Terjadi Kesalahan", state="error")
-                st.error(f"**Pesan Error:** `{e}`")
+                st.error(f"**Mesej Ralat:** `{e}`")
                 with st.expander("🔍 Detail teknis (traceback lengkap)"): st.code(traceback.format_exc())
             finally:
                 if temp_path and os.path.exists(temp_path):
@@ -588,34 +596,48 @@ Keluarkan HANYA JSON array valid dengan skema persis:
 # 5. HASIL PENILAIAN & UI TAB BERSANDING
 # ==========================================
 if st.session_state.proses_selesai:
-    st.success("Analisis Dual-AI selesai! Silakan bandingkan penalaran Gemini dan Groq Llama 3 di bawah ini.")
+    st.success("Analisis Dual-AI selesai! Sila bandingkan penalaran Gemini dan Groq di bawah.")
 
     st.subheader("🔍 1. Fakta Observasi: Verifikasi Kelayakan, 5W1H & FUP")
     st.caption("Fakta dasar yang diekstrak oleh Gemini (sebagai Mata) dan disetujui bersama oleh kedua AI.")
     st.data_editor(st.session_state.df_verifikasi, num_rows="dynamic", use_container_width=True)
 
     st.subheader("🔗 2. Audit Konsistensi Metodologi PDCA (Golden Thread)")
-    tab_alur_gemini, tab_alur_groq = st.tabs(["🤖 Evaluasi GEMINI", "🦙 Evaluasi GROQ LLAMA 3"])
+    tab_alur_gemini, tab_alur_groq = st.tabs(["🤖 Evaluasi GEMINI", "🚀 Evaluasi GROQ"])
     with tab_alur_gemini: st.data_editor(st.session_state.df_alur_gemini, num_rows="dynamic", use_container_width=True, key="tbl_alur_gemini")
     with tab_alur_groq: st.data_editor(st.session_state.df_alur_groq, num_rows="dynamic", use_container_width=True, key="tbl_alur_groq")
 
     st.subheader("📝 3. Tabel Validasi Rubrik (Keputusan Akhir)")
-    st.caption("Manajer/Juri bertindak sebagai Hakim. Silakan sesuaikan kolom **skor** setelah mempertimbangkan debat argumen dari kedua AI.")
-    tab_rub_gemini, tab_rub_groq = st.tabs(["🤖 Skoring GEMINI", "🦙 Skoring GROQ LLAMA 3"])
+    st.caption("Manajer/Juri bertindak sebagai Hakim. Anda boleh melihat perbandingan skor di bawah.")
+    
+    # Tambahan Tab Perbandingan Langsung di UI
+    tab_rub_gemini, tab_rub_groq, tab_rub_banding = st.tabs(["🤖 Skoring GEMINI", "🚀 Skoring GROQ", "📊 Perbandingan Lengkap"])
+    
     with tab_rub_gemini:
         st.metric("Total Skor Rubrik (Gemini)", f"{st.session_state.total_skor_gemini:.0f}")
         edited_rubrik_gemini = st.data_editor(st.session_state.df_rubrik_gemini, num_rows="dynamic", use_container_width=True, key="tbl_rubrik_gemini")
+    
     with tab_rub_groq:
-        st.metric("Total Skor Rubrik (Groq Llama)", f"{st.session_state.total_skor_groq:.0f}")
+        st.metric("Total Skor Rubrik (Groq)", f"{st.session_state.total_skor_groq:.0f}")
         edited_rubrik_groq = st.data_editor(st.session_state.df_rubrik_groq, num_rows="dynamic", use_container_width=True, key="tbl_rubrik_groq")
+        
+    with tab_rub_banding:
+        if not edited_rubrik_gemini.empty and not edited_rubrik_groq.empty:
+            df_gem_sub = edited_rubrik_gemini[['no', 'kriteria', 'status validasi', 'skor', 'justifikasi']].rename(columns={'skor': 'Skor (Gemini)', 'justifikasi': 'Justifikasi (Gemini)'})
+            df_groq_sub = edited_rubrik_groq[['no', 'kriteria', 'skor', 'justifikasi']].rename(columns={'skor': 'Skor (Groq)', 'justifikasi': 'Justifikasi (Groq)'})
+            df_merged_ui = pd.merge(df_gem_sub, df_groq_sub, on=['no', 'kriteria'], how='outer')
+            kolom_susunan = ['no', 'kriteria', 'status validasi', 'Skor (Gemini)', 'Skor (Groq)', 'Justifikasi (Gemini)', 'Justifikasi (Groq)']
+            st.data_editor(df_merged_ui[kolom_susunan], num_rows="dynamic", use_container_width=True, disabled=True)
+        else:
+            st.info("Sila pastikan jadual Gemini dan Groq berjaya diekstrak untuk memaparkan perbandingan.")
 
     st.subheader("💰 4. Tabel Validasi Impact & Saving (14 Kategori)")
-    tab_sav_gemini, tab_sav_groq = st.tabs(["🤖 Analisis Saving GEMINI", "🦙 Analisis Saving GROQ LLAMA 3"])
+    tab_sav_gemini, tab_sav_groq = st.tabs(["🤖 Analisis Saving GEMINI", "🚀 Analisis Saving GROQ"])
     with tab_sav_gemini: st.data_editor(st.session_state.df_saving_gemini, num_rows="dynamic", use_container_width=True, key="tbl_saving_gemini")
     with tab_sav_groq: st.data_editor(st.session_state.df_saving_groq, num_rows="dynamic", use_container_width=True, key="tbl_saving_groq")
 
     st.subheader("💬 5. Feedback & Saran untuk Peserta")
-    tab_feed_gemini, tab_feed_groq = st.tabs(["🤖 Saran GEMINI", "🦙 Saran GROQ LLAMA 3"])
+    tab_feed_gemini, tab_feed_groq = st.tabs(["🤖 Saran GEMINI", "🚀 Saran GROQ"])
     with tab_feed_gemini: st.data_editor(st.session_state.df_feedback_gemini, num_rows="dynamic", use_container_width=True, key="tbl_feed_gemini")
     with tab_feed_groq: st.data_editor(st.session_state.df_feedback_groq, num_rows="dynamic", use_container_width=True, key="tbl_feed_groq")
 
@@ -630,18 +652,30 @@ if st.session_state.proses_selesai:
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         if not st.session_state.df_verifikasi.empty:
             st.session_state.df_verifikasi.to_excel(writer, sheet_name="1. Verifikasi Visual", index=False)
+            
         if not st.session_state.df_alur_gemini.empty:
             st.session_state.df_alur_gemini.to_excel(writer, sheet_name="2. Alur Logika (Gemini)", index=False)
         if not st.session_state.df_alur_groq.empty:
             st.session_state.df_alur_groq.to_excel(writer, sheet_name="2. Alur Logika (Groq)", index=False)
-        if not edited_rubrik_gemini.empty:
-            edited_rubrik_gemini.to_excel(writer, sheet_name="3. Rubrik (Gemini)", index=False)
-        if not edited_rubrik_groq.empty:
-            edited_rubrik_groq.to_excel(writer, sheet_name="3. Rubrik (Groq)", index=False)
+            
+        # PENGGABUNGAN JADUAL EXCEL GEMINI VS GROQ
+        if not edited_rubrik_gemini.empty and not edited_rubrik_groq.empty:
+            df_gem_sub = edited_rubrik_gemini[['no', 'kriteria', 'status validasi', 'skor', 'justifikasi']].rename(columns={'skor': 'Skor (Gemini)', 'justifikasi': 'Justifikasi (Gemini)'})
+            df_groq_sub = edited_rubrik_groq[['no', 'kriteria', 'skor', 'justifikasi']].rename(columns={'skor': 'Skor (Groq)', 'justifikasi': 'Justifikasi (Groq)'})
+            df_merged_rubrik = pd.merge(df_gem_sub, df_groq_sub, on=['no', 'kriteria'], how='outer')
+            kolom_susunan = ['no', 'kriteria', 'status validasi', 'Skor (Gemini)', 'Skor (Groq)', 'Justifikasi (Gemini)', 'Justifikasi (Groq)']
+            df_merged_rubrik[kolom_susunan].to_excel(writer, sheet_name="3. Rubrik (Gemini vs Groq)", index=False)
+        else:
+            if not edited_rubrik_gemini.empty:
+                edited_rubrik_gemini.to_excel(writer, sheet_name="3. Rubrik (Gemini)", index=False)
+            if not edited_rubrik_groq.empty:
+                edited_rubrik_groq.to_excel(writer, sheet_name="3. Rubrik (Groq)", index=False)
+                
         if not st.session_state.df_saving_gemini.empty:
             st.session_state.df_saving_gemini.to_excel(writer, sheet_name="4. Saving (Gemini)", index=False)
         if not st.session_state.df_saving_groq.empty:
             st.session_state.df_saving_groq.to_excel(writer, sheet_name="4. Saving (Groq)", index=False)
+            
         if not st.session_state.df_feedback_gemini.empty:
             st.session_state.df_feedback_gemini.to_excel(writer, sheet_name="5. Feedback (Gemini)", index=False)
         if not st.session_state.df_feedback_groq.empty:
@@ -658,7 +692,7 @@ if st.session_state.proses_selesai:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     with col2:
-        if st.button("🔄 Unggah Dokumen Baru (Reset)"):
+        if st.button("🔄 Muat Naik Dokumen Baru (Reset)"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
