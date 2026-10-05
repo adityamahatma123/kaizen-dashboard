@@ -88,7 +88,7 @@ except Exception as e:
     st.stop()
 
 MODEL_GEMINI = "gemini-3.5-flash-lite"
-MODEL_GROQ = "llama-3.3-70b-versatile"
+MODEL_GROQ = "llama3-70b-8192e"
 
 GENERATION_CONFIG_TEXT = types.GenerateContentConfig(
     seed=42, thinking_config=types.ThinkingConfig(thinking_level="medium")
