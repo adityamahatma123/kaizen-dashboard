@@ -93,6 +93,10 @@ MODEL_GROQ = _secret("GROQ_MODEL", "openai/gpt-oss-120b")
 THINKING_LEVEL = _secret("THINKING_LEVEL", "medium")
 COOLDOWN_GEMINI = int(_secret("COOLDOWN_GEMINI", "5"))  # detik; naikkan jika sering kena 429
 BATAS_UPLOAD_DETIK = 240
+GROQ_MAX_OUTPUT = int(_secret("GROQ_MAX_OUTPUT", "4096"))   # batas token output Groq
+GROQ_REASONING = _secret("GROQ_REASONING", "low")           # low/medium/high (khusus gpt-oss)
+GROQ_MAX_CHARS = int(_secret("GROQ_MAX_CHARS", "8000"))     # potong teks konteks per bagian untuk Groq
+GROQ_EXTRA = {"extra_body": {"reasoning_effort": GROQ_REASONING}} if "gpt-oss" in MODEL_GROQ else {}
 
 
 @st.cache_resource(show_spinner=False)
@@ -239,6 +243,7 @@ _DEFAULTS = {
     "df_saving_gemini": pd.DataFrame(), "df_saving_groq": pd.DataFrame(),
     "df_feedback_gemini": pd.DataFrame(), "df_feedback_groq": pd.DataFrame(),
     "transkrip": [],
+    "log_error": [],
     "nama_file": "Dokumen_Kaizen",
 }
 for _k, _val in _DEFAULTS.items():
@@ -255,6 +260,23 @@ class NullLog:
 
 
 NULL = NullLog()
+
+
+class BufferLog:
+    """Menampung pesan log dari thread, lalu ditampilkan oleh thread utama."""
+    def __init__(self):
+        self.pesan = []
+
+    def write(self, teks, *args, **kwargs):
+        self.pesan.append(str(teks))
+
+
+def ringkas(teks, batas):
+    """Potong teks panjang (dipakai agar prompt Groq muat di limit token)."""
+    teks = teks or ""
+    if len(teks) <= batas:
+        return teks
+    return teks[:batas] + "\n...[dipotong agar muat limit token]"
 
 
 def _tunggu_dari_pesan(pesan, default):
@@ -309,10 +331,20 @@ def panggil_groq(prompt_text, deskripsi, log_ui, maksimal_percobaan=3):
                     {"role": "user", "content": prompt_text},
                 ],
                 temperature=0.2,
-                max_completion_tokens=8192,
+                max_completion_tokens=GROQ_MAX_OUTPUT,
+                **GROQ_EXTRA,
             )
-            teks = response.choices[0].message.content or ""
+            pilihan = response.choices[0]
+            teks = pilihan.message.content or ""
+            if pilihan.finish_reason == "length":
+                log_ui.write(
+                    f"⚠️ **{deskripsi} (Groq):** output terpotong (finish_reason=length). "
+                    "Naikkan GROQ_MAX_OUTPUT atau turunkan GROQ_REASONING."
+                )
             if not teks.strip():
+                log_ui.write(
+                    f"⚠️ **{deskripsi} (Groq):** respons kosong (biasanya token habis dipakai reasoning). Mencoba ulang..."
+                )
                 time.sleep(3)
                 continue
             log_ui.write(f"✅ **{deskripsi} (Groq):** selesai.")
@@ -338,12 +370,18 @@ def panggil_groq(prompt_text, deskripsi, log_ui, maksimal_percobaan=3):
     return ""
 
 
-def paralel(kerja_gemini, kerja_groq):
-    """Jalankan satu tugas Gemini dan satu tugas Groq bersamaan."""
+def paralel(log, catatan, kerja_gemini, kerja_groq):
+    """Jalankan tugas Gemini & Groq bersamaan. Fungsi kerja menerima objek log (buffer)."""
+    bg, bq = BufferLog(), BufferLog()
     with ThreadPoolExecutor(max_workers=2) as ex:
-        a = ex.submit(kerja_gemini)
-        b = ex.submit(kerja_groq)
-        return a.result(), b.result()
+        a = ex.submit(kerja_gemini, bg)
+        b = ex.submit(kerja_groq, bq)
+        hasil_a, hasil_b = a.result(), b.result()
+    for pesan in bg.pesan + bq.pesan:
+        log.write(pesan)
+        if "❌" in pesan or "⚠️" in pesan:
+            catatan.append(pesan)
+    return hasil_a, hasil_b
 
 
 def bersihkan_dan_parse_json(teks_raw):
@@ -757,10 +795,14 @@ def jalankan_pipeline(uploaded_file, log):
         raw_verif = panggil_gemini([gemini_file, prompt_verifikasi()], "Verifikasi Visual & FUP", log, config=CONFIG_JSON)
 
         log.write("🔗 **[3/6] Audit logika PDCA** (Gemini & Groq berjalan paralel)")
+        catatan = []
+        N = GROQ_MAX_CHARS
         p_alur = prompt_alur(laporan, raw_verif)
+        p_alur_groq = prompt_alur(ringkas(laporan, N), ringkas(raw_verif, N // 2))
         raw_alur_gem, raw_alur_groq = paralel(
-            lambda: panggil_gemini(p_alur, "Audit Logika", NULL, config=CONFIG_JSON),
-            lambda: panggil_groq(p_alur, "Audit Logika", NULL),
+            log, catatan,
+            lambda lg: panggil_gemini(p_alur, "Audit Logika", lg, config=CONFIG_JSON),
+            lambda lg: panggil_groq(p_alur_groq, "Audit Logika", lg),
         )
         log.write(f"✅ Audit logika selesai (Gemini: {'OK' if raw_alur_gem else 'GAGAL'}, Groq: {'OK' if raw_alur_groq else 'GAGAL'})")
 
@@ -770,26 +812,36 @@ def jalankan_pipeline(uploaded_file, log):
 
         log.write("📝 **[5/6] Skoring rubrik & analisis saving** (paralel)")
         p_skor_gem = prompt_skoring(laporan, raw_verif, kritis, konfirmatif, raw_alur_gem)
-        p_skor_groq = prompt_skoring(laporan, raw_verif, kritis, konfirmatif, raw_alur_groq)
+        p_skor_groq = prompt_skoring(
+            ringkas(laporan, N), ringkas(raw_verif, N // 2), ringkas(kritis, N // 2),
+            ringkas(konfirmatif, N // 3), ringkas(raw_alur_groq, N // 2), 
+        )
         raw_skor_gem, raw_skor_groq = paralel(
-            lambda: panggil_gemini(p_skor_gem, "Skoring Rubrik", NULL, config=CONFIG_JSON),
-            lambda: panggil_groq(p_skor_groq, "Skoring Rubrik", NULL),
+            log, catatan,
+            lambda lg: panggil_gemini(p_skor_gem, "Skoring Rubrik", lg, config=CONFIG_JSON),
+            lambda lg: panggil_groq(p_skor_groq, "Skoring Rubrik", lg),
         )
         log.write(f"✅ Skoring selesai (Gemini: {'OK' if raw_skor_gem else 'GAGAL'}, Groq: {'OK' if raw_skor_groq else 'GAGAL'})")
 
         p_sav = prompt_saving(laporan)
+        p_sav_groq = prompt_saving(ringkas(laporan, N))
         raw_sav_gem, raw_sav_groq = paralel(
-            lambda: panggil_gemini(p_sav, "Analisis Saving", NULL, config=CONFIG_JSON),
-            lambda: panggil_groq(p_sav, "Analisis Saving", NULL),
+            log, catatan,
+            lambda lg: panggil_gemini(p_sav, "Analisis Saving", lg, config=CONFIG_JSON),
+            lambda lg: panggil_groq(p_sav_groq, "Analisis Saving", lg),
         )
         log.write("✅ Analisis saving selesai")
 
         log.write("💬 **[6/6] Umpan balik peserta** (paralel)")
         p_fb_gem = prompt_feedback(laporan, raw_verif, raw_alur_gem, raw_skor_gem)
-        p_fb_groq = prompt_feedback(laporan, raw_verif, raw_alur_groq, raw_skor_groq)
+        p_fb_groq = prompt_feedback(
+            ringkas(laporan, N), ringkas(raw_verif, N // 2),
+            ringkas(raw_alur_groq, N // 2), ringkas(raw_skor_groq, N // 2),
+        )
         raw_fb_gem, raw_fb_groq = paralel(
-            lambda: panggil_gemini(p_fb_gem, "Umpan Balik", NULL, config=CONFIG_JSON),
-            lambda: panggil_groq(p_fb_groq, "Umpan Balik", NULL),
+            log, catatan,
+            lambda lg: panggil_gemini(p_fb_gem, "Umpan Balik", lg, config=CONFIG_JSON),
+            lambda lg: panggil_groq(p_fb_groq, "Umpan Balik", lg),
         )
 
         return {
@@ -799,6 +851,7 @@ def jalankan_pipeline(uploaded_file, log):
             "skor_gem": raw_skor_gem, "skor_groq": raw_skor_groq,
             "sav_gem": raw_sav_gem, "sav_groq": raw_sav_groq,
             "fb_gem": raw_fb_gem, "fb_groq": raw_fb_groq,
+            "catatan": catatan,
         }
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -816,6 +869,7 @@ def jalankan_pipeline(uploaded_file, log):
 def simpan_hasil(raw, nama_file):
     ss = st.session_state
     ss.nama_file = nama_file
+    ss.log_error = raw.get("catatan", [])
     ss.df_verifikasi = buat_df(bersihkan_dan_parse_json(raw["verif"]))
     ss.df_alur_gemini = buat_df(bersihkan_dan_parse_json(raw["alur_gem"]))
     ss.df_alur_groq = buat_df(bersihkan_dan_parse_json(raw["alur_groq"]))
@@ -935,8 +989,17 @@ if st.session_state.proses_selesai:
         sisi = [n for n, d in (("Gemini", ss.df_rubrik_gemini), ("Groq", ss.df_rubrik_groq)) if d.empty]
         st.warning(
             f"Skoring rubrik {' & '.join(sisi)} kosong (gagal/ter-limit atau JSON tidak terbaca). "
-            "Cek 'Transkrip Lengkap' di bawah untuk melihat output mentahnya."
+            "Lihat penyebabnya di bawah dan output mentah di 'Transkrip Lengkap'."
         )
+        if ss.log_error:
+            with st.expander("🩺 Penyebab error dari Gemini/Groq", expanded=True):
+                for pesan in ss.log_error:
+                    st.markdown(f"- {pesan}")
+        else:
+            st.info(
+                "Tidak ada error API yang tercatat — artinya model membalas tetapi JSON-nya tidak terbaca. "
+                "Cek 'Transkrip Lengkap' untuk melihat isi balasan mentahnya."
+            )
 
     st.subheader("🔍 1. Fakta Observasi: Verifikasi Kelayakan, 5W1H & FUP")
     st.caption("Fakta dasar yang diekstrak oleh Gemini (sebagai Mata) dan dipakai bersama oleh kedua AI.")
