@@ -96,7 +96,7 @@ COOLDOWN_GEMINI = int(_secret("COOLDOWN_GEMINI", "5"))  # detik; naikkan jika se
 BATAS_UPLOAD_DETIK = 240
 GROQ_TPM = int(_secret("GROQ_TPM", "8000"))  # kuota token per MENIT akun Groq (Free plan: 8000). Naikkan bila tier lebih besar
 GROQ_JEDA = int(_secret("GROQ_JEDA", "60" if GROQ_TPM < 20000 else "0"))  # jeda minimum (detik) antar panggilan Groq
-GROQ_FITUR = _secret("GROQ_FITUR", "skoring" if GROQ_TPM < 20000 else "semua")  # "skoring": Groq hanya menilai rubrik (hemat kuota); "semua": + alur, saving, feedback
+GROQ_FITUR = _secret("GROQ_FITUR", "semua")  # "skoring": Groq hanya menilai rubrik (hemat kuota); "semua": + alur, saving, feedback
 GROQ_MAX_OUTPUT = int(_secret("GROQ_MAX_OUTPUT", str(min(8192, int(GROQ_TPM * 0.4)))))  # batas token output Groq
 GROQ_REASONING = _secret("GROQ_REASONING", "low")           # low/medium/high (khusus gpt-oss)
 CHAR_PER_TOKEN = 3.0  # perkiraan karakter per token (konservatif untuk teks Indonesia)
@@ -688,6 +688,13 @@ def format_tabel_rubrik(json_data):
         elif skor != int(skor) or int(skor) not in RUBRIK_META[no][2]:
             cek = f"⚠️ skor {skor:g} di luar pilihan rubrik {pilihan} — tidak dihitung"
             skor = None
+        just = str(next((it[k] for k in ("justifikasi", "alasan", "keterangan", "justification") if k in it), ""))
+        bukti = str(it.get("bukti_kunci", "") or "").strip()
+        bukan = str(it.get("kenapa_bukan_lebih_tinggi", "") or "").strip()
+        if bukti:
+            just += f" | Bukti kunci: {bukti}"
+        if bukan and bukan != "-":
+            just += f" | Bukan skor lebih tinggi karena: {bukan}"
         baris[no] = {
             "no": no,
             "kriteria": RUBRIK_META[no][1],
@@ -695,9 +702,7 @@ def format_tabel_rubrik(json_data):
             "alasan_manual": alasan,
             "skor": skor,
             "cek_skor": cek,
-            "justifikasi": str(
-                next((it[k] for k in ("justifikasi", "alasan", "keterangan", "justification") if k in it), "")
-            ),
+            "justifikasi": just,
             "perlu_manual": perlu,
         }
     df = pd.DataFrame([baris[n] for n in sorted(baris)], columns=KOLOM_RUBRIK)
@@ -923,6 +928,113 @@ TAHAP_GROQ = [
 ]
 
 
+SKEMA_SKOR = '{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik merujuk isi dokumen dan analisis koherensi, sebutkan angka/isi konkret", "bukti_kunci": "isi singkat bukti paling menentukan + halaman, atau TIDAK ADA", "kenapa_bukan_lebih_tinggi": "unsur yang belum terpenuhi untuk naik tingkat, atau - bila sudah tertinggi", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}'
+SKEMA_WASIT = '{"no": 18, "skor_rekomendasi": 3, "lebih_dekat_ke": "Groq", "unsur_penentu": "unsur rubrik yang membuat kedua penilai berbeda", "alasan": "alasan spesifik merujuk isi dan halaman dokumen", "halaman_bukti": "hal. 67"}'
+
+_ATURAN_KALIBRASI = """ATURAN KALIBRASI (agar skor konsisten antar penilai):
+- Skor tertinggi pada suatu kriteria HANYA bila SEMUA unsur pada deskripsi tingkat itu dibuktikan secara eksplisit di data. Unsur yang cuma diklaim di narasi tanpa dokumen/halaman yang disebut (misal daftar hadir/absensi, no register dokumen, tanda tangan approval) dianggap BELUM terbukti — turunkan satu tingkat.
+- Nilai tiap kriteria secara independen; jangan menaikkan skor karena kriteria lain bagus (halo effect), kecuali ada aturan peta bukti yang menghubungkannya.
+- Bila ragu di antara dua tingkat skor, pilih tingkat yang lebih rendah dan set perlu_validasi_manual = "YA" dengan alasan keraguannya.
+- Untuk setiap kriteria isi "bukti_kunci" (bukti paling menentukan: isi singkat + halaman, maksimal 25 kata, atau "TIDAK ADA") dan "kenapa_bukan_lebih_tinggi" (1 kalimat: unsur apa yang belum terpenuhi untuk naik ke tingkat berikutnya; "-" bila sudah tingkat tertinggi)."""
+
+# Bagian hasil ekstraksi (1-9, lihat prompt_ekstraksi) yang relevan untuk tiap tahap skoring Groq.
+for _t, _bagian in zip(TAHAP_GROQ, [(1, 2), (3, 4), (5,), (6, 7, 2), (8,)]):
+    _t["ekstraksi"] = _bagian
+
+
+def _pecah_ekstraksi(laporan):
+    """Pecah hasil ekstraksi menjadi {nomor bagian 1-9: teks} dari judul bernomor berurutan (mis. '1. MASALAH UTAMA')."""
+    laporan = laporan or ""
+    pola = re.compile(r"(?m)^[#*\s]*([1-9])\.\s*\**\s*[A-Z][A-Z0-9 &/()\-,]{3,}")
+    posisi, terakhir = [], 0
+    for m in pola.finditer(laporan):
+        n = int(m.group(1))
+        if n == terakhir + 1:
+            posisi.append((n, m.start()))
+            terakhir = n
+    hasil = {}
+    for i, (n, mulai) in enumerate(posisi):
+        akhir = posisi[i + 1][1] if i + 1 < len(posisi) else len(laporan)
+        hasil[n] = laporan[mulai:akhir].strip()
+    return hasil
+
+
+def _saring_ekstraksi(laporan, bagian, batas):
+    """Ambil hanya bagian ekstraksi yang relevan untuk tahap itu; bila judul tak terbaca, pakai potongan awal+akhir."""
+    sek = _pecah_ekstraksi(laporan)
+    teks = "\n\n".join(sek[n] for n in bagian if n in sek) if len(sek) >= 6 else ""
+    return ringkas(teks, batas) if teks else ringkas(laporan, batas)
+
+
+def prompt_wasit(selisih):
+    blok = []
+    for s in selisih:
+        n = s["no"]
+        blok.append(
+            f"### Kriteria {n} ({RUBRIK_META[n][1]})\n"
+            f"Rubrik:\n{_RUBRIK_PER_KRITERIA[n]}\n"
+            f"Skor yang diperbolehkan: {sorted(RUBRIK_META[n][2])}\n"
+            f"Penilai Gemini: skor {s['gem']:g} — {s['gem_just']}\n"
+            f"Penilai Groq: skor {s['groq']:g} — {s['groq_just']}"
+        )
+    isi = "\n\n".join(blok)
+    return f"""Anda adalah WASIT independen dalam penjurian Kaizen. Dua penilai AI memberi skor BERBEDA pada kriteria di bawah. Dokumen PDF asli terlampir: baca ulang dokumen itu LANGSUNG (termasuk foto, tabel, dan lampiran) untuk memverifikasi unsur yang diperdebatkan. Jangan memihak dan jangan merata-ratakan.
+
+{isi}
+
+{_ATURAN_KALIBRASI}
+
+Untuk setiap kriteria: (1) tentukan unsur rubrik yang membuat kedua penilai berbeda, (2) cari bukti unsur itu di dokumen (sebut halaman dan isi konkretnya; bila tidak ditemukan, nyatakan), (3) tetapkan skor rekomendasi dari pilihan yang diperbolehkan, dan sebut penilai mana yang lebih dekat ("Gemini", "Groq", atau "Lainnya").
+
+{blok_output(SKEMA_WASIT, False)}"""
+
+
+def jalankan_wasit(gemini_file, raw_gem, raw_groq, lg):
+    """Gemini membaca ulang PDF untuk kriteria yang skornya berbeda; hasilnya hanya REKOMENDASI untuk juri."""
+    df_g, _ = format_tabel_rubrik(bersihkan_dan_parse_json(raw_gem))
+    df_q, _ = format_tabel_rubrik(bersihkan_dan_parse_json(raw_groq))
+    if df_g.empty or df_q.empty:
+        return ""
+    m = df_g.merge(df_q, on="no", suffixes=("_g", "_q"))
+    selisih = [
+        dict(no=int(r["no"]), gem=r["skor_g"], gem_just=r["justifikasi_g"], groq=r["skor_q"], groq_just=r["justifikasi_q"])
+        for _, r in m.iterrows()
+        if pd.notna(r["skor_g"]) and pd.notna(r["skor_q"]) and r["skor_g"] != r["skor_q"]
+    ]
+    if not selisih:
+        return ""
+    return panggil_tervalidasi(
+        lambda p: panggil_gemini([gemini_file, p], "Wasit Selisih Skor", lg, config=CONFIG_JSON),
+        prompt_wasit(selisih), "Wasit Selisih Skor", lg,
+        buat_validator(len(selisih), ("no", "skor_rekomendasi")), "Gemini",
+    )
+
+
+def tambah_wasit(df_banding, raw_wasit):
+    """Tambahkan kolom Rekomendasi Wasit + Alasan Wasit ke tabel perbandingan (juri tetap yang memutuskan)."""
+    df = df_banding.copy()
+    rek, alasan = {}, {}
+    for d in bersihkan_dan_parse_json(raw_wasit):
+        it = {str(k).strip().lower(): v for k, v in d.items()}
+        no = _ke_nomor(it.get("no"))
+        if no not in RUBRIK_META or no in alasan:
+            continue
+        skor = _ke_float(it.get("skor_rekomendasi"))
+        if skor is not None and skor == int(skor) and int(skor) in RUBRIK_META[no][2]:
+            rek[no] = skor
+        bagian = [
+            f"Lebih dekat ke {it['lebih_dekat_ke']}" if it.get("lebih_dekat_ke") else "",
+            f"Unsur penentu: {it['unsur_penentu']}" if it.get("unsur_penentu") else "",
+            str(it.get("alasan", "") or ""),
+            f"Bukti: {it['halaman_bukti']}" if it.get("halaman_bukti") else "",
+        ]
+        alasan[no] = " | ".join(x for x in bagian if x)
+    pos = list(df.columns).index("Status Validasi") if "Status Validasi" in df.columns else len(df.columns)
+    df.insert(pos, "Rekomendasi Wasit", df["No"].map(rek))
+    df.insert(pos + 1, "Alasan Wasit", df["No"].map(alasan).fillna(""))
+    return df
+
+
 def prompt_ekstraksi():
     return (
         "Anda berperan sebagai Analis Ekstraksi Bukti Dokumen Kaizen yang teliti dan hanya melaporkan fakta yang benar-benar tertulis/tervisualisasi di dokumen, tanpa mengarang, karena akan dipakai untuk analisis koherensi logika, bukan sekadar cek ada/tidak.\n\n"
@@ -1080,6 +1192,8 @@ ATURAN PENILAIAN:
 - Kalau GATE CHECK di hasil verifikasi menyatakan "TIDAK LAYAK" (bukan proyek improvement), sebutkan ini secara eksplisit di justifikasi kriteria 1-5 (tahap Plan) karena ini mempengaruhi validitas keseluruhan submission — tapi tetap beri skor per kriteria sesuai bukti yang ada (jangan otomatis nol semua tanpa dasar).
 - Bersikap ketat: skor tinggi hanya untuk bukti yang benar-benar kuat, lengkap, DAN koheren secara logika.
 
+{_ATURAN_KALIBRASI}
+
 ATURAN PENENTUAN KEBUTUHAN VALIDASI MANUAL:
 Selain skor dan justifikasi, untuk SETIAP kriteria tentukan juga apakah kriteria itu PERLU DIVALIDASI MANUAL oleh asesor lapangan, dengan mengisi field "perlu_validasi_manual" ("YA" atau "TIDAK") dan "alasan_validasi_manual" (WAJIB diisi 1 kalimat spesifik kalau "YA"; kosongkan "" kalau "TIDAK"). Tandai "YA" jika salah satu berlaku:
 (a) Bukti di dokumen ini bersifat implisit/tidak eksplisit sehingga interpretasinya bisa diperdebatkan.
@@ -1101,7 +1215,7 @@ LANGKAH KERJA (lakukan untuk SETIAP kriteria 1 sampai 21, berurutan):
    - Action plan (kriteria 11-12) harus menyasar akar masalah yang dinilai pada kriteria 8-10.
 5. Tulis justifikasi 1-2 kalimat yang menyebut ISI dan ANGKA konkret dari dokumen serta hasil audit alur/verifikasi (DILARANG hanya menyebut nomor halaman).
 
-KELENGKAPAN OUTPUT: tepat 21 objek, nomor 1 sampai 21 berurutan, tidak ada yang dilewati. Nilai "skor" harus ANGKA (bukan teks) dan harus salah satu dari skor yang diperbolehkan untuk kriteria itu. Bila bukti suatu kriteria tidak ditemukan sama sekali, beri skor 0 dan tulis di justifikasi bahwa bukti tidak ditemukan. WAJIB isi juga field perlu_validasi_manual dan alasan_validasi_manual.
+KELENGKAPAN OUTPUT: tepat 21 objek, nomor 1 sampai 21 berurutan, tidak ada yang dilewati. Nilai "skor" harus ANGKA (bukan teks) dan harus salah satu dari skor yang diperbolehkan untuk kriteria itu. Bila bukti suatu kriteria tidak ditemukan sama sekali, beri skor 0 dan tulis di justifikasi bahwa bukti tidak ditemukan. WAJIB isi juga field bukti_kunci, kenapa_bukan_lebih_tinggi, perlu_validasi_manual dan alasan_validasi_manual.
 
 {blok_output(SKEMA_SKOR, groq)}"""
 
@@ -1224,7 +1338,9 @@ ATURAN:
 Rujukan kriteria yang sering butuh cek lapangan (bukan aturan baku):
 {rujukan}
 
-KELENGKAPAN OUTPUT: tepat {len(nomor)} objek untuk kriteria nomor {daftar}. "skor" harus ANGKA dari daftar yang diperbolehkan.
+{_ATURAN_KALIBRASI}
+
+KELENGKAPAN OUTPUT: tepat {len(nomor)} objek untuk kriteria nomor {daftar}. "skor" harus ANGKA dari daftar yang diperbolehkan; isi juga bukti_kunci dan kenapa_bukan_lebih_tinggi.
 
 {blok_output(SKEMA_SKOR, True)}"""
 
@@ -1266,7 +1382,7 @@ def bangun_prompt_tahap(t, laporan, raw_verif, kritis, konfirmatif, raw_alur, mt
     kritis_t = ringkas(kritis, int(total * 0.10))
     konf_t = ringkas(konfirmatif, int(total * 0.05))
     sisa = total - len(alur_t) - len(verif_t) - len(kritis_t) - len(konf_t)
-    lap_t = ringkas(laporan, max(sisa, int(total * 0.3)))
+    lap_t = _saring_ekstraksi(laporan, t["ekstraksi"], max(sisa, int(total * 0.3)))
     return prompt_skoring_tahap(t, lap_t, verif_t, alur_t, kritis_t, konf_t)
 
 
@@ -1306,8 +1422,19 @@ def jalan_groq(deskripsi, builder, data, bobot, mt, validator, catatan, lg):
     )
 
 
+def _no_item(d):
+    it = {str(k).strip().lower(): v for k, v in d.items()}
+    return _ke_nomor(next((it[k] for k in ("no", "nomor", "no_kriteria", "nomor_kriteria") if k in it), None))
+
+
+def _item_valid(d):
+    df, _ = format_tabel_rubrik([d])
+    return (not df.empty) and pd.notna(df.iloc[0]["skor"]) and df.iloc[0]["cek_skor"] == ""
+
+
 def skoring_groq(laporan, raw_verif, kritis, konfirmatif, raw_alur, catatan, lg):
-    """Skoring rubrik oleh Groq. Kuota besar -> 1 panggilan; kuota kecil (mis. Free 8K TPM) -> per tahap PDCA."""
+    """Skoring rubrik oleh Groq. Kuota besar -> 1 panggilan; kuota kecil (mis. Free 8K TPM) -> per tahap PDCA,
+    dan kriteria yang gagal diulang dalam kelompok kecil (maks 2 kriteria) sampai terisi."""
     if _tpm() >= 30000:
         data = dict(
             laporan_ekstraksi=laporan, raw_verifikasi=raw_verif, temuan_kritis=kritis,
@@ -1320,26 +1447,102 @@ def skoring_groq(laporan, raw_verif, kritis, konfirmatif, raw_alur, catatan, lg)
         f"ℹ️ Kuota Groq {_tpm()} token/menit: rubrik dinilai per tahap PDCA ({len(TAHAP_GROQ)} panggilan kecil) "
         "dengan data bukti disaring dan diringkas per tahap."
     )
-    gabungan, dipakai = [], set()
-    for t in TAHAP_GROQ:
+
+    def jalankan_tahap(t):
         nomor = t["no"]
-        mt = min(GROQ_MAX_OUTPUT, 700 + 200 * len(nomor))
+        mt = min(GROQ_MAX_OUTPUT, 700 + 260 * len(nomor))
         label = f"Skoring {t['kode']}"
 
-        def bangun(f, t=t, mt=mt):
+        def bangun(f):
             return bangun_prompt_tahap(t, laporan, raw_verif, kritis, konfirmatif, raw_alur, mt, f)
 
         raw = panggil_tervalidasi(
-            lambda extra, bangun=bangun, mt=mt, label=label: panggil_groq_adaptif(
-                lambda f: bangun(f) + extra, label, lg, max_tokens=mt
-            ),
+            lambda extra: panggil_groq_adaptif(lambda f: bangun(f) + extra, label, lg, max_tokens=mt),
             "", label, lg, validator_rubrik_subset(nomor), "Groq",
         )
+        return [d for d in bersihkan_dan_parse_json(raw) if _no_item(d) in nomor]
+
+    hasil = {}
+    for t in TAHAP_GROQ:
+        for d in jalankan_tahap(t):
+            hasil.setdefault(_no_item(d), d)
+
+    kurang = [n for n in RUBRIK_META if n not in hasil or not _item_valid(hasil[n])]
+    if kurang:
+        lg.write(f"⚠️ **Skoring Groq:** kriteria {kurang} belum terisi/valid; mengulang dalam kelompok kecil...")
+        per_tahap = {}
+        for t in TAHAP_GROQ:
+            sisa = [n for n in t["no"] if n in kurang]
+            if sisa:
+                per_tahap[t["kode"]] = (t, sisa)
+        for kode, (t, daftar) in per_tahap.items():
+            for i in range(0, len(daftar), 2):
+                grup = tuple(daftar[i:i + 2])
+                for d in jalankan_tahap(dict(t, no=grup, kode=f"{kode} ulang")):
+                    n = _no_item(d)
+                    if n in grup and (n not in hasil or not _item_valid(hasil[n])):
+                        hasil[n] = d
+        masih = [n for n in RUBRIK_META if n not in hasil or not _item_valid(hasil[n])]
+        if masih:
+            lg.write(f"⚠️ **Skoring Groq:** kriteria {masih} tetap gagal setelah diulang; dibiarkan kosong untuk juri.")
+    items = [hasil[n] for n in sorted(hasil)]
+    return json.dumps(items, ensure_ascii=False) if items else ""
+
+
+# Kelompok titik audit alur untuk Groq berkuota kecil: (label, titik, bagian ekstraksi yang relevan, kategori verifikasi)
+GRUP_ALUR = [
+    ("PLAN-1", ("P1", "P2", "P3"), (1, 2), ("GATE", "5W1H")),
+    ("PLAN-2", ("P4", "P5", "P6", "P7"), (3, 4), ("FOTO",)),
+    ("DO", ("D1", "D2", "D3", "D4"), (4, 5, 6), ("FUP", "FOTO")),
+    ("CHECK-ACT", ("C1", "C2", "A1", "A2", "A3", "A4"), (1, 2, 7, 8), ("FUP",)),
+]
+
+
+def prompt_alur_grup(kode_titik, laporan, verif):
+    """prompt_alur versi Groq yang hanya memuat sebagian titik (P1..A4) — untuk kuota token/menit kecil."""
+    p = prompt_alur(laporan, verif, groq=True)
+    baris = []
+    for ln in p.split("\n"):
+        m = re.match(r"^([PDCA]\d)\. ", ln)
+        if m and m.group(1) not in kode_titik:
+            continue
+        baris.append(ln)
+    p = "\n".join(baris)
+    p = re.sub(r"## FASE [A-Z]+ \([^)]*\)\n(?=\n|## FASE|Untuk tiap titik)", "", p)
+    asli = "TEPAT 17 temuan (P1-P7, D1-D4, C1-C2, A1-A4)"
+    return p.replace(asli, f"TEPAT {len(kode_titik)} temuan ({', '.join(kode_titik)})")
+
+
+def audit_alur_groq(laporan, raw_verif, catatan, lg):
+    """Audit alur PDCA oleh Groq. Kuota besar -> 1 panggilan; kuota kecil -> per kelompok titik dengan bukti yang disaring."""
+    if _tpm() >= 30000:
+        return jalan_groq(
+            "Audit Logika", prompt_alur, dict(laporan_ekstraksi=laporan, raw_verifikasi=raw_verif),
+            dict(laporan_ekstraksi=3, raw_verifikasi=1), min(GROQ_MAX_OUTPUT, 3600),
+            buat_validator(17, ("no", "verdict")), catatan, lg,
+        )
+    catatan.append(f"ℹ️ Kuota Groq {_tpm()} token/menit: audit alur dijalankan per fase ({len(GRUP_ALUR)} panggilan kecil).")
+    gabungan, dipakai = [], set()
+    for label, kode, bagian, kunci in GRUP_ALUR:
+        mt = min(GROQ_MAX_OUTPUT, 500 + 300 * len(kode))
+        nama = f"Audit Logika {label}"
+
+        def bangun(f, kode=kode, bagian=bagian, kunci=kunci, mt=mt):
+            total = anggaran_char(len(prompt_alur_grup(kode, "", "")), mt, f)
+            return prompt_alur_grup(
+                kode, _saring_ekstraksi(laporan, bagian, int(total * 0.75)), _saring_verif(raw_verif, kunci, int(total * 0.25))
+            )
+
+        raw = panggil_tervalidasi(
+            lambda extra, bangun=bangun, nama=nama, mt=mt: panggil_groq_adaptif(
+                lambda f: bangun(f) + extra, nama, lg, max_tokens=mt
+            ),
+            "", nama, lg, buat_validator(len(kode), ("no", "verdict")), "Groq",
+        )
         for d in bersihkan_dan_parse_json(raw):
-            it = {str(k).strip().lower(): v for k, v in d.items()}
-            no = _ke_nomor(next((it[k] for k in ("no", "nomor", "no_kriteria", "nomor_kriteria") if k in it), None))
-            if no in nomor and no not in dipakai:
-                dipakai.add(no)
+            k = str(d.get("no", "")).strip().upper()
+            if k in kode and k not in dipakai:
+                dipakai.add(k)
                 gabungan.append(d)
     return json.dumps(gabungan, ensure_ascii=False) if gabungan else ""
 
@@ -1402,12 +1605,7 @@ def jalankan_pipeline(uploaded_file, log):
         # ---- [3/6] Audit benang merah PDCA
         log.write("🔗 **[3/6] Audit logika PDCA**" + (" (Gemini & Groq paralel)" if groq_penuh else " (Gemini)"))
         v_alur = buat_validator(17, ("no", "verdict"))
-        kerja_alur = (
-            lambda lg2: jalan_groq(
-                "Audit Logika", prompt_alur, dict(laporan_ekstraksi=laporan, raw_verifikasi=raw_verif),
-                dict(laporan_ekstraksi=3, raw_verifikasi=1), min(GROQ_MAX_OUTPUT, 3600), v_alur, catatan, lg2,
-            )
-        ) if groq_penuh else None
+        kerja_alur = (lambda lg2: audit_alur_groq(laporan, raw_verif, catatan, lg2)) if groq_penuh else None
         raw_alur_gem, raw_alur_groq = ganda("Audit Logika", prompt_alur(laporan, raw_verif), kerja_alur, v_alur)
         groq_alur_txt = "OK" if raw_alur_groq else ("DILEWATI" if not groq_penuh else "GAGAL")
         log.write(f"✅ Audit logika selesai (Gemini: {'OK' if raw_alur_gem else 'GAGAL'}, Groq: {groq_alur_txt})")
@@ -1429,6 +1627,8 @@ def jalankan_pipeline(uploaded_file, log):
             periksa_rubrik,
         )
         log.write(f"✅ Skoring selesai (Gemini: {'OK' if raw_skor_gem else 'GAGAL'}, Groq: {'OK' if raw_skor_groq else 'GAGAL'})")
+        log.write("⚖️ **Wasit selisih skor** (Gemini membaca ulang PDF untuk kriteria yang skornya berbeda)")
+        raw_wasit = jalankan_wasit(gemini_file, raw_skor_gem, raw_skor_groq, lg)
 
         v_sav = buat_validator(14, ("kategori", "status"))
         kerja_sav = (
@@ -1464,6 +1664,7 @@ def jalankan_pipeline(uploaded_file, log):
             "sav_gem": raw_sav_gem, "sav_groq": raw_sav_groq,
             "fb_gem": raw_fb_gem, "fb_groq": raw_fb_groq,
             "catatan": catatan,
+            "wasit": raw_wasit,
         }
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -1495,6 +1696,7 @@ def simpan_hasil(raw, nama_file):
     ss.df_rubrik_gemini, ss.total_skor_gemini = terapkan_guardrail(df_g, ss.df_verifikasi, alur_gem)
     ss.df_rubrik_groq, ss.total_skor_groq = terapkan_guardrail(df_q, ss.df_verifikasi, alur_groq)
     ss.df_banding = gabungkan_rubrik(ss.df_rubrik_gemini, ss.df_rubrik_groq)
+    ss.df_banding = tambah_wasit(ss.df_banding, raw.get("wasit", ""))
 
     # Bila rubrik kosong, tampilkan penyebab konkretnya (bukan hanya "JSON tidak terbaca").
     for nama, teks, df in (
@@ -1520,6 +1722,7 @@ def simpan_hasil(raw, nama_file):
         {"Peran": "Tinjauan Kritis & Konfirmatif", "Laporan": f"Kritik:\n{raw['kritis']}\n\nBantahan:\n{raw['konfirmatif']}"},
         {"Peran": "Skoring (Gemini)", "Laporan": raw["skor_gem"]},
         {"Peran": "Skoring (Groq)", "Laporan": raw["skor_groq"]},
+        {"Peran": "Wasit selisih skor (Gemini)", "Laporan": raw.get("wasit", "")},
         {"Peran": "Saving (Gemini)", "Laporan": raw["sav_gem"]},
         {"Peran": "Saving (Groq)", "Laporan": raw["sav_groq"]},
         {"Peran": "Feedback (Gemini)", "Laporan": raw["fb_gem"]},
@@ -1661,7 +1864,8 @@ if st.session_state.proses_selesai:
     st.subheader("📝 3. Tabel Validasi Rubrik (Keputusan Akhir)")
     st.caption(
         "Tab pertama menampilkan skor Gemini dan Groq berdampingan dalam satu tabel. "
-        "'Skor Final (Juri)' otomatis terisi bila kedua AI sepakat; bila berbeda, kolom dibiarkan kosong untuk Anda putuskan."
+        "'Skor Final (Juri)' otomatis terisi bila kedua AI sepakat; bila berbeda, kolom dibiarkan kosong untuk Anda putuskan — "
+        "kolom 'Rekomendasi Wasit' membantu: Gemini membaca ulang PDF khusus untuk kriteria yang berbeda."
     )
     tab_banding, tab_gem, tab_groq = st.tabs(["📊 Perbandingan (1 Tabel)", "🤖 Detail GEMINI", "🚀 Detail GROQ"])
 
@@ -1686,6 +1890,8 @@ if st.session_state.proses_selesai:
                     min_value=0, max_value=8, step=1, format="%g", width="small",
                     help="Isi/ubah skor akhir sesuai keputusan juri (mengikuti pilihan skor rubrik).",
                 ),
+                "Rekomendasi Wasit": st.column_config.NumberColumn(format="%g", width="small", help="Rekomendasi Gemini setelah membaca ulang PDF, HANYA untuk kriteria yang skornya berbeda. Keputusan tetap di juri."),
+                "Alasan Wasit": st.column_config.TextColumn(width="large"),
                 "Catatan Validator": st.column_config.TextColumn(width="medium"),
                 "Justifikasi Gemini": st.column_config.TextColumn(width="large"),
                 "Justifikasi Groq": st.column_config.TextColumn(width="large"),
