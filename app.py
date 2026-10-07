@@ -96,7 +96,7 @@ COOLDOWN_GEMINI = int(_secret("COOLDOWN_GEMINI", "5"))  # detik; naikkan jika se
 BATAS_UPLOAD_DETIK = 240
 GROQ_TPM = int(_secret("GROQ_TPM", "8000"))  # kuota token per MENIT akun Groq (Free plan: 8000). Naikkan bila tier lebih besar
 GROQ_JEDA = int(_secret("GROQ_JEDA", "60" if GROQ_TPM < 20000 else "0"))  # jeda minimum (detik) antar panggilan Groq
-GROQ_FITUR = _secret("GROQ_FITUR", "semua")  # "skoring": Groq hanya menilai rubrik (hemat kuota); "semua": + alur, saving, feedback
+GROQ_FITUR = _secret("GROQ_FITUR", "semua")  # "skoring": Groq hanya rubrik | "inti": rubrik + audit alur | "semua": + saving & umpan balik
 GROQ_MAX_OUTPUT = int(_secret("GROQ_MAX_OUTPUT", str(min(8192, int(GROQ_TPM * 0.4)))))  # batas token output Groq
 GROQ_REASONING = _secret("GROQ_REASONING", "low")           # low/medium/high (khusus gpt-oss)
 CHAR_PER_TOKEN = 3.0  # perkiraan karakter per token (konservatif untuk teks Indonesia)
@@ -250,7 +250,7 @@ _DEFAULTS = {
     "df_verifikasi": pd.DataFrame(),
     "df_alur_gemini": pd.DataFrame(), "df_alur_groq": pd.DataFrame(),
     "df_rubrik_gemini": pd.DataFrame(), "df_rubrik_groq": pd.DataFrame(),
-    "df_banding": pd.DataFrame(),
+    "df_banding": pd.DataFrame(), "df_alur_banding": pd.DataFrame(), "df_saving_banding": pd.DataFrame(),
     "total_skor_gemini": 0.0, "total_skor_groq": 0.0,
     "df_saving_gemini": pd.DataFrame(), "df_saving_groq": pd.DataFrame(),
     "df_feedback_gemini": pd.DataFrame(), "df_feedback_groq": pd.DataFrame(),
@@ -710,6 +710,113 @@ def format_tabel_rubrik(json_data):
     return df, total
 
 
+KODE_ALUR = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "D1", "D2", "D3", "D4", "C1", "C2", "A1", "A2", "A3", "A4"]
+_FASE_ALUR = {"P": "PLAN", "D": "DO", "C": "CHECK", "A": "ACT"}
+_URUT_VERDICT = {"KONSISTEN": 0, "LEMAH": 1, "TIDAK KONSISTEN": 2}
+
+
+def _norm(x):
+    """Normalisasi teks untuk membandingkan status/verdict dua AI (spasi, huruf besar, 'Virtual / Soft' = 'Virtual/Soft')."""
+    if x is None or (isinstance(x, float) and math.isnan(x)):
+        return ""
+    return re.sub(r"\s*/\s*", "/", " ".join(str(x).split())).upper()
+
+
+def _teks(r, k):
+    if r is None or k not in r.index:
+        return ""
+    v = r[k]
+    return "" if v is None or (isinstance(v, float) and math.isnan(v)) else str(v)
+
+
+def gabungkan_alur(df_gem, df_groq):
+    """Satukan audit alur Gemini & Groq jadi SATU tabel berdampingan (kunci gabung: kode titik P1..A4)."""
+    def peta(df):
+        out = {}
+        if df is not None and not df.empty and "no" in df.columns:
+            for _, r in df.iterrows():
+                k = str(r["no"]).strip().upper()
+                if k and k not in out:
+                    out[k] = r
+        return out
+
+    g, q = peta(df_gem), peta(df_groq)
+    if not g and not q:
+        return pd.DataFrame()
+    urut = KODE_ALUR + [k for k in list(g) + list(q) if k not in KODE_ALUR]
+    baris, terlihat = [], set()
+    for k in urut:
+        if k in terlihat or (k not in g and k not in q):
+            continue
+        terlihat.add(k)
+        rg, rq = g.get(k), q.get(k)
+        vg, vq = _norm(_teks(rg, "verdict")), _norm(_teks(rq, "verdict"))
+        if vg and vq:
+            hasil = "✅ Sama" if vg == vq else "⚠️ Beda"
+        else:
+            hasil = "❓ Data tidak lengkap"
+        ada = [v for v in (vg, vq) if v]
+        acuan = max(ada, key=lambda v: _URUT_VERDICT.get(v, 1)) if ada else ""
+        baris.append({
+            "No": k,
+            "Fase": _teks(rg, "fase") or _teks(rq, "fase") or _FASE_ALUR.get(k[:1], ""),
+            "Tahap": _teks(rg, "tahap") or _teks(rq, "tahap"),
+            "Verdict Gemini": vg,
+            "Verdict Groq": vq,
+            "Hasil Banding": hasil,
+            "Verdict Acuan (terketat)": acuan,
+            "Catatan Validator": "",
+            "Temuan Gemini": _teks(rg, "temuan"),
+            "Temuan Groq": _teks(rq, "temuan"),
+        })
+    return pd.DataFrame(baris)
+
+
+URUT_SAVING = KATEGORI_IMPACT_14 + ["Jenis Saving"]
+
+
+def gabungkan_saving(df_gem, df_groq):
+    """Satukan analisis saving Gemini & Groq jadi SATU tabel (14 kategori impact + Jenis Saving)."""
+    def peta(df):
+        out = {}
+        if df is not None and not df.empty and "kategori" in df.columns:
+            for _, r in df.iterrows():
+                k = _norm(r["kategori"])
+                if k and k not in out:
+                    out[k] = r
+        return out
+
+    g, q = peta(df_gem), peta(df_groq)
+    if not g and not q:
+        return pd.DataFrame()
+    nama = {_norm(n): n for n in URUT_SAVING}
+    urut = [_norm(n) for n in URUT_SAVING] + [k for k in list(g) + list(q) if k not in nama]
+    baris, terlihat = [], set()
+    for k in urut:
+        if k in terlihat or (k not in g and k not in q):
+            continue
+        terlihat.add(k)
+        rg, rq = g.get(k), q.get(k)
+        sg, sq = " ".join(_teks(rg, "status").split()), " ".join(_teks(rq, "status").split())
+        sama = bool(sg and sq and _norm(sg) == _norm(sq))
+        if sg and sq:
+            hasil = "✅ Sama" if sama else "⚠️ Beda"
+        else:
+            hasil = "❓ Data tidak lengkap"
+        baris.append({
+            "Kategori": nama.get(k) or _teks(rg, "kategori") or _teks(rq, "kategori"),
+            "Status Gemini": sg,
+            "Status Groq": sq,
+            "Hasil Banding": hasil,
+            # Terisi otomatis hanya bila kedua AI sepakat; bila beda, juri yang memutuskan.
+            "Status Final (Juri)": sg if sama else "",
+            "Catatan Validator": "",
+            "Keterangan Gemini": _teks(rg, "keterangan"),
+            "Keterangan Groq": _teks(rq, "keterangan"),
+        })
+    return pd.DataFrame(baris)
+
+
 def buat_validator(min_item, kunci_wajib=()):
     """Validator umum untuk daftar JSON: jumlah item cukup dan tiap item memuat kunci wajib."""
     def cek(teks):
@@ -924,12 +1031,12 @@ TAHAP_GROQ = [
     {"kode": "DO-CHECK", "nama": "DO & CHECK — Implementasi, cek & monitor hasil", "no": (14, 15, 16, 17),
      "titik": ("D4", "C1", "C2"), "verif": ("FOTO",)},
     {"kode": "ACT", "nama": "ACT — Standardisasi, sosialisasi & replikasi", "no": (18, 19, 20, 21),
-     "titik": ("A1", "A2", "A3", "A4"), "verif": ()},
+     "titik": ("A1", "A2", "A3", "A4"), "verif": ("FUP",)},
 ]
 
 
 SKEMA_SKOR = '{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik merujuk isi dokumen dan analisis koherensi, sebutkan angka/isi konkret", "bukti_kunci": "isi singkat bukti paling menentukan + halaman, atau TIDAK ADA", "kenapa_bukan_lebih_tinggi": "unsur yang belum terpenuhi untuk naik tingkat, atau - bila sudah tertinggi", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}'
-SKEMA_WASIT = '{"no": 18, "skor_rekomendasi": 3, "lebih_dekat_ke": "Groq", "unsur_penentu": "unsur rubrik yang membuat kedua penilai berbeda", "alasan": "alasan spesifik merujuk isi dan halaman dokumen", "halaman_bukti": "hal. 67"}'
+SKEMA_WASIT = '{"no": 18, "skor_rekomendasi": 3, "lebih_dekat_ke": "Groq", "unsur_penentu": "unsur rubrik yang membuat kedua penilai berbeda", "verifikasi_klaim": "klaim Gemini: ... -> TERBUKTI/TIDAK (hal. X); klaim Groq: ... -> TERBUKTI/TIDAK (hal. X)", "alasan": "alasan spesifik merujuk isi dan halaman dokumen", "halaman_bukti": "hal. 67"}'
 
 _ATURAN_KALIBRASI = """ATURAN KALIBRASI (agar skor konsisten antar penilai):
 - Skor tertinggi pada suatu kriteria HANYA bila SEMUA unsur pada deskripsi tingkat itu dibuktikan secara eksplisit di data. Unsur yang cuma diklaim di narasi tanpa dokumen/halaman yang disebut (misal daftar hadir/absensi, no register dokumen, tanda tangan approval) dianggap BELUM terbukti — turunkan satu tingkat.
@@ -937,15 +1044,50 @@ _ATURAN_KALIBRASI = """ATURAN KALIBRASI (agar skor konsisten antar penilai):
 - Bila ragu di antara dua tingkat skor, pilih tingkat yang lebih rendah dan set perlu_validasi_manual = "YA" dengan alasan keraguannya.
 - Untuk setiap kriteria isi "bukti_kunci" (bukti paling menentukan: isi singkat + halaman, maksimal 25 kata, atau "TIDAK ADA") dan "kenapa_bukan_lebih_tinggi" (1 kalimat: unsur apa yang belum terpenuhi untuk naik ke tingkat berikutnya; "-" bila sudah tingkat tertinggi)."""
 
-# Bagian hasil ekstraksi (1-9, lihat prompt_ekstraksi) yang relevan untuk tiap tahap skoring Groq.
-for _t, _bagian in zip(TAHAP_GROQ, [(1, 2), (3, 4), (5,), (6, 7, 2), (8,)]):
+BATAS_KRITERIA = [
+    ((2, 5), "Kriteria 2 hanya menilai apakah losses measurement ADA dan RELEVAN dengan masalah (sesuai rubrik). Hubungan/perhitungan antara angka losses dan target dinilai di kriteria 5 (Target SMART), BUKAN di kriteria 2 — jangan menghukum dua kali."),
+    ((7, 8), "Kriteria 7 menilai ketepatan kategori 4M pada tiap cabang fishbone; kriteria 8 menilai logika rantai why-why. Jangan mencampur keduanya."),
+    ((9, 10), "Kriteria 9 menilai ada/tidaknya BUKTI untuk akar penyebab; kriteria 10 menilai apakah akar penyebab sudah FINAL (tidak bisa ditanya 'kenapa' lagi). Jangan menurunkan kriteria 10 semata karena bukti kurang — kecuali root cause itu memang bersifat asumtif/potensi."),
+    ((13, 19), "Status FUP dinilai di kriteria 13. Kriteria 19 dinilai dari dokumen STANDAR (IK/SOP/OPL/CILT/PM/Centerline): no register dan approval Sec Head Area (lihat checklist keberadaan bukti butir c dan d). Jangan menghitung ketiadaan approval FUP dua kali."),
+]
+
+PEMERIKSAAN_WAJIB = {
+    2: "cek apakah ada angka losses lengkap dengan satuan dan periode yang relevan dengan masalah.",
+    7: "daftar tiap cabang fishbone → kategori 4M yang dipakai → benar/salah. Skor 2 hanya bila SEMUA benar; satu saja salah kategori → skor 1.",
+    8: "sebutkan mata rantai why yang paling lemah (why N → why N+1: langsung atau loncat) dan apakah root cause akhir muncul sebagai cabang di fishbone. Skor 2 hanya bila tidak ada loncatan dan akhirnya terhubung ke fishbone.",
+    9: "daftar tiap root cause final → bukti (jenis + halaman) atau TANPA BUKTI (pakai checklist keberadaan bukti butir e). Skor 5 hanya bila tidak ada root cause TANPA BUKTI.",
+    10: "daftar tiap root cause final → FINAL atau MASIH ASUMTIF / bisa ditanya 'kenapa' lagi. Skor 2 hanya bila semuanya final.",
+    16: "bandingkan angka target (kriteria 5) dengan angka hasil akhir beserta satuan, scope, dan periodenya.",
+    18: "daftar dokumen standar yang dibuat (IK/SOP/OPL/CILT/PM/Centerline) beserta nomor registernya (checklist butir c); skor 5 hanya bila semua jenis standar yang relevan sudah ada.",
+    19: "sebut no register dan approval Sec Head Area tiap dokumen standar (checklist butir c dan d).",
+    20: "pakai checklist keberadaan bukti butir b: skor 5 hanya bila daftar hadir DILAMPIRKAN dan pesertanya pihak yang relevan; bila sosialisasi hanya diklaim di narasi tanpa lampiran, skor maksimal 3.",
+}
+
+
+def blok_batas_pemeriksaan(nomor):
+    """Aturan batas antar-kriteria + pemeriksaan wajib, difilter ke kriteria yang sedang dinilai."""
+    nomor = set(nomor)
+    batas = [t for ns_, t in BATAS_KRITERIA if nomor & set(ns_)]
+    wajib = [f"  * Kriteria {n}: {t}" for n, t in PEMERIKSAAN_WAJIB.items() if n in nomor]
+    out = []
+    if batas:
+        out.append("BATAS ANTAR-KRITERIA (agar satu kelemahan tidak dihukum dua kali):\n" + "\n".join(f"- {t}" for t in batas))
+    if wajib:
+        out.append(
+            "PEMERIKSAAN WAJIB SEBELUM MEMBERI SKOR (tulis hasilnya ringkas di 'bukti_kunci', maksimal 40 kata):\n" + "\n".join(wajib)
+        )
+    return "\n\n".join(out)
+
+
+# Bagian hasil ekstraksi (1-10, lihat prompt_ekstraksi) yang relevan untuk tiap tahap skoring Groq.
+for _t, _bagian in zip(TAHAP_GROQ, [(1, 2), (3, 4, 10), (5, 10), (6, 7, 2, 10), (8, 10)]):
     _t["ekstraksi"] = _bagian
 
 
 def _pecah_ekstraksi(laporan):
     """Pecah hasil ekstraksi menjadi {nomor bagian 1-9: teks} dari judul bernomor berurutan (mis. '1. MASALAH UTAMA')."""
     laporan = laporan or ""
-    pola = re.compile(r"(?m)^[#*\s]*([1-9])\.\s*\**\s*[A-Z][A-Z0-9 &/()\-,]{3,}")
+    pola = re.compile(r"(?m)^[#*\s]*(10|[1-9])\.\s*\**\s*[A-Z][A-Z0-9 &/()\-,]{3,}")
     posisi, terakhir = [], 0
     for m in pola.finditer(laporan):
         n = int(m.group(1))
@@ -967,6 +1109,9 @@ def _saring_ekstraksi(laporan, bagian, batas):
 
 
 def prompt_wasit(selisih):
+    def sisi(nama, skor, just):
+        return f"Penilai {nama}: " + (f"skor {skor:g} — {just}" if skor is not None else "TIDAK MEMBERI SKOR (gagal/kosong)")
+
     blok = []
     for s in selisih:
         n = s["no"]
@@ -974,33 +1119,54 @@ def prompt_wasit(selisih):
             f"### Kriteria {n} ({RUBRIK_META[n][1]})\n"
             f"Rubrik:\n{_RUBRIK_PER_KRITERIA[n]}\n"
             f"Skor yang diperbolehkan: {sorted(RUBRIK_META[n][2])}\n"
-            f"Penilai Gemini: skor {s['gem']:g} — {s['gem_just']}\n"
-            f"Penilai Groq: skor {s['groq']:g} — {s['groq_just']}"
+            f"{sisi('Gemini', s['gem'], s['gem_just'])}\n"
+            f"{sisi('Groq', s['groq'], s['groq_just'])}"
         )
     isi = "\n\n".join(blok)
-    return f"""Anda adalah WASIT independen dalam penjurian Kaizen. Dua penilai AI memberi skor BERBEDA pada kriteria di bawah. Dokumen PDF asli terlampir: baca ulang dokumen itu LANGSUNG (termasuk foto, tabel, dan lampiran) untuk memverifikasi unsur yang diperdebatkan. Jangan memihak dan jangan merata-ratakan.
+    aturan = blok_batas_pemeriksaan([s["no"] for s in selisih])
+    return f"""Anda adalah WASIT independen dalam penjurian Kaizen. Dua penilai AI memberi skor BERBEDA (atau salah satunya tidak memberi skor) pada kriteria di bawah. Dokumen PDF asli terlampir: baca ulang dokumen itu LANGSUNG (termasuk foto, tabel, dan lampiran). Jangan memihak dan jangan merata-ratakan.
 
 {isi}
 
+Penyebab selisih biasanya salah satu dari: (a) FAKTA berbeda — satu penilai menyebut suatu bukti ada/tidak ada (mis. daftar hadir, tanda tangan approval, laporan trial); (b) TAFSIR rubrik berbeda — satu penilai menilai hal yang bukan cakupan kriteria itu (lihat BATAS ANTAR-KRITERIA); (c) salah satu penilai tidak memberi skor — verifikasi skor penilai yang ada.
+
+LANGKAH untuk setiap kriteria:
+1. Identifikasi tiap KLAIM FAKTUAL konkret dari kedua penilai (mis. 'penyebab X salah kategori', 'tidak ada daftar hadir', 'FUP belum ditandatangani').
+2. VERIFIKASI tiap klaim itu langsung di PDF (sebut halaman dan isi konkret). Jangan menerima klaim tanpa memeriksanya, dan jangan mengabaikan klaim spesifik dari penilai mana pun.
+3. Tetapkan skor rekomendasi dari pilihan yang diperbolehkan berdasarkan klaim yang TERBUKTI dan teks rubrik apa adanya; sebut penilai yang lebih dekat ('Gemini', 'Groq', atau 'Lainnya').
+
 {_ATURAN_KALIBRASI}
 
-Untuk setiap kriteria: (1) tentukan unsur rubrik yang membuat kedua penilai berbeda, (2) cari bukti unsur itu di dokumen (sebut halaman dan isi konkretnya; bila tidak ditemukan, nyatakan), (3) tetapkan skor rekomendasi dari pilihan yang diperbolehkan, dan sebut penilai mana yang lebih dekat ("Gemini", "Groq", atau "Lainnya").
+{aturan}
 
 {blok_output(SKEMA_WASIT, False)}"""
 
 
 def jalankan_wasit(gemini_file, raw_gem, raw_groq, lg):
-    """Gemini membaca ulang PDF untuk kriteria yang skornya berbeda; hasilnya hanya REKOMENDASI untuk juri."""
+    """Gemini membaca ulang PDF untuk kriteria yang skornya berbeda / salah satu AI tidak memberi skor.
+    Hasilnya hanya REKOMENDASI untuk juri."""
     df_g, _ = format_tabel_rubrik(bersihkan_dan_parse_json(raw_gem))
     df_q, _ = format_tabel_rubrik(bersihkan_dan_parse_json(raw_groq))
     if df_g.empty or df_q.empty:
         return ""
-    m = df_g.merge(df_q, on="no", suffixes=("_g", "_q"))
-    selisih = [
-        dict(no=int(r["no"]), gem=r["skor_g"], gem_just=r["justifikasi_g"], groq=r["skor_q"], groq_just=r["justifikasi_q"])
-        for _, r in m.iterrows()
-        if pd.notna(r["skor_g"]) and pd.notna(r["skor_q"]) and r["skor_g"] != r["skor_q"]
-    ]
+
+    def peta(df):
+        out = {}
+        for _, r in df.iterrows():
+            s = r["skor"]
+            out[int(r["no"])] = (None if pd.isna(s) else float(s), str(r["justifikasi"]))
+        return out
+
+    pg, pq = peta(df_g), peta(df_q)
+    selisih = []
+    for n in RUBRIK_META:
+        sg, jg = pg.get(n, (None, ""))
+        sq, jq = pq.get(n, (None, ""))
+        if sg is None and sq is None:
+            continue
+        if sg is not None and sq is not None and sg == sq:
+            continue
+        selisih.append(dict(no=n, gem=sg, gem_just=jg, groq=sq, groq_just=jq))
     if not selisih:
         return ""
     return panggil_tervalidasi(
@@ -1025,6 +1191,7 @@ def tambah_wasit(df_banding, raw_wasit):
         bagian = [
             f"Lebih dekat ke {it['lebih_dekat_ke']}" if it.get("lebih_dekat_ke") else "",
             f"Unsur penentu: {it['unsur_penentu']}" if it.get("unsur_penentu") else "",
+            f"Verifikasi klaim: {it['verifikasi_klaim']}" if it.get("verifikasi_klaim") else "",
             str(it.get("alasan", "") or ""),
             f"Bukti: {it['halaman_bukti']}" if it.get("halaman_bukti") else "",
         ]
@@ -1052,6 +1219,7 @@ def prompt_ekstraksi():
         "7. HASIL AKHIR/PENCAPAIAN (termasuk SAVING): kutip persis angka hasil akhir yang dilaporkan, SATUAN, dan periode/metode pengukurannya persis (untuk dibandingkan dengan metode pengukuran kondisi awal di poin 1) — eksplisit ATAU implisit sesuai Aturan #1. Ikuti Aturan #4 kalau data ini berasal dari tabel impact bertingkat ambang batas.\n"
         "8. STANDARDISASI: dokumen IK/SOP/OPL/CILT/PM/Centerline yang dibuat, status validasi/approval, bukti sosialisasi (absensi — sebutkan SIAPA/JABATAN APA yang mengikuti bila ada), dan bukti replikasi ke area/mesin lain (sebutkan karakteristik area tujuan replikasi bila disebutkan, untuk menilai apakah memang sejenis/sepadan dengan area asal masalah). Untuk setiap tanggal yang ditemukan di dokumen standardisasi/sosialisasi ini, WAJIB ikuti Aturan #3 di atas — bedakan tanggal berlaku template dengan tanggal aktual pelaksanaan sebelum menyimpulkan apa pun.\n"
         "9. KUALITAS PENULISAN: catat kalau ada typo/salah ketik yang cukup mengganggu, kalimat ambigu/membingungkan, atau bagian yang tidak konsisten penomoran/formatnya (untuk bahan feedback ke peserta, bukan untuk skor rubrik). JANGAN memasukkan tanggal berlaku template dokumen kontrol (Aturan #3) sebagai contoh kesalahan penulisan di sini.\n\n"
+        "10. CHECKLIST KEBERADAAN BUKTI (WAJIB, satu baris per butir, jangan dilewati): tulis 'ADA' atau 'TIDAK ADA', lalu halaman dan isi konkretnya (maksimal 20 kata). Butir: (a) Form Usulan Perbaikan (FUP) resmi — sebut apakah kolom approval sudah bertanda tangan; (b) daftar hadir/absensi sosialisasi sebagai LAMPIRAN dokumen (bukan sekadar narasi 'sudah sosialisasi') — sebut jumlah peserta dan tanggal aktual bila terbaca; (c) nomor register dokumen standar (IK/SOP/OPL/CILT/PM/Centerline) — sebut nomornya; (d) tanda tangan/approval Sec Head Area pada dokumen standar; (e) laporan trial/uji/hasil pengukuran yang membuktikan tiap root cause — sebut root cause mana yang punya bukti dan mana yang TIDAK; (f) data pengukuran hasil akhir (before vs after) beserta satuan dan periode; (g) foto before/after untuk tiap action plan. Butir yang hanya diklaim di narasi tanpa lampiran ditulis 'TIDAK ADA LAMPIRAN (hanya diklaim di narasi hal. X)'.\n\n"
         "Jika suatu elemen tidak ditemukan di dokumen sama sekali (baik eksplisit maupun implisit), nyatakan dengan jelas 'TIDAK DITEMUKAN' — jangan mengarang."
     )
 
@@ -1120,6 +1288,8 @@ A1. "Action Plan Efektif ke Standardisasi": apakah dokumen standar (SOP/IK/OPL/d
 A2. "Standardisasi ke Validasi/Approval": apakah standar yang disosialisasikan (poin sosialisasi) adalah standar YANG SAMA dengan yang sudah divalidasi/disahkan, bukan draft berbeda?
 A3. "Sosialisasi ke Sasaran yang Tepat": apakah pihak yang mengikuti sosialisasi (dari bukti absensi) memang pihak yang relevan/terlibat di area masalah (sesuai Who/PIC di 5W1H)? Gunakan tanggal AKTUAL pelaksanaan sosialisasi (bukan tanggal berlaku template formulir) kalau relevan untuk memeriksa urutan waktu.
 A4. "Standardisasi/Action Plan ke Kelayakan Replikasi": apakah area/mesin yang diklaim direplikasi punya karakteristik yang sepadan/sejenis dengan area asal masalah (sehingga replikasi itu masuk akal secara teknis), bukan cuma diklaim "direplikasi" tanpa penjelasan kesesuaian?
+
+CARA MENULIS 'temuan' (WAJIB agar verdict dapat diverifikasi, bukan kesan umum): periksa butir-per-butir DULU, tulis hasilnya ringkas di field temuan dengan penanda ✔ (sesuai) atau ✘ (bermasalah), baru tentukan verdict. Verdict TIDAK BOLEH 'KONSISTEN' bila ada satu pun butir ✘ yang tidak dijelaskan dokumen. Butir yang wajib dienumerasi: P5 — setiap cabang fishbone: '<penyebab> → kategori 4M → ✔/✘'; P6 — setiap mata rantai why: 'why N → why N+1 → langsung/loncat' dan apakah root cause akhir muncul sebagai cabang di fishbone; P7 — setiap root cause akhir: '<root cause> → bukti (jenis, halaman) atau TANPA BUKTI → ✔/✘'; D2 — setiap PIC: '<PIC> → pekerjaan → sesuai/tidak'; A3 — setiap kelompok peserta sosialisasi: relevan/tidak, dan apakah daftar hadir DILAMPIRKAN. Untuk fakta ada/tidaknya lampiran (FUP, daftar hadir, no register, approval, laporan trial) rujuk CHECKLIST KEBERADAAN BUKTI (butir 10 hasil ekstraksi). Field temuan maksimal 90 kata.
 
 Untuk tiap titik, beri verdict SALAH SATU dari: "KONSISTEN" (jelas dan masuk akal, didukung angka/isi konkret), "LEMAH" (ada tapi kurang detail/agak dipaksakan/tidak ada angka jelas, atau root cause masih bersifat "potensi"), atau "TIDAK KONSISTEN" (ada loncatan logika/manipulasi scope/tidak nyambung/tidak ditemukan).
 
@@ -1194,6 +1364,8 @@ ATURAN PENILAIAN:
 
 {_ATURAN_KALIBRASI}
 
+{blok_batas_pemeriksaan(RUBRIK_META)}
+
 ATURAN PENENTUAN KEBUTUHAN VALIDASI MANUAL:
 Selain skor dan justifikasi, untuk SETIAP kriteria tentukan juga apakah kriteria itu PERLU DIVALIDASI MANUAL oleh asesor lapangan, dengan mengisi field "perlu_validasi_manual" ("YA" atau "TIDAK") dan "alasan_validasi_manual" (WAJIB diisi 1 kalimat spesifik kalau "YA"; kosongkan "" kalau "TIDAK"). Tandai "YA" jika salah satu berlaku:
 (a) Bukti di dokumen ini bersifat implisit/tidak eksplisit sehingga interpretasinya bisa diperdebatkan.
@@ -1209,6 +1381,7 @@ LANGKAH KERJA (lakukan untuk SETIAP kriteria 1 sampai 21, berurutan):
 1. Baca deskripsi tiap tingkat skor pada rubrik kriteria itu.
 2. Cari bukti pada data; pilih tingkat skor TERTINGGI yang syaratnya benar-benar terpenuhi (jangan membulatkan ke atas dan jangan menebak bila bukti tidak ada).
 3. Cek titik audit/verifikasi yang relevan (peta bukti di atas); turunkan skor sesuai aturan bila titik itu LEMAH/TIDAK KONSISTEN.
+3b. UJI BALIK: untuk kriteria yang akan diberi skor TERTINGGI, cari satu temuan terkuat yang MENENTANG skor itu dari <temuan_analisis_kritis> atau titik audit yang LEMAH/TIDAK KONSISTEN; bila ada dan belum dibantah bukti konkret di dokumen, turunkan satu tingkat.
 4. Cek konsistensi lintas tahap PDCA sebelum menetapkan skor akhir:
    - Hasil (kriteria 16-17) tidak mungkin kuat bila pelaksanaan (kriteria 14) tidak terlaksana sama sekali.
    - Standardisasi dan replikasi (kriteria 18-21) hanya bermakna bila perbaikan terbukti efektif pada tahap CHECK. Jika target tidak tercapai (kriteria 16 = 0) tetapi standardisasi diklaim lengkap, sebutkan ketidakselarasan itu di justifikasi dan set perlu_validasi_manual = "YA".
@@ -1237,6 +1410,8 @@ Untuk setiap kategori, status HARUS salah satu dari: 'IYA' (ada dampak terbukti 
 SELAIN itu, tentukan juga 'Jenis Saving' berdasarkan dokumen. Pilihan statusnya adalah: 'Hard Saving' (saving finansial nyata >100 juta rupiah/tahun, terkait penurunan pemakaian gas/listrik/air/pembelian material/manpower), 'Virtual/Soft Saving' (saving tidak real, berupa opportunity loss yang dihindari, cost avoidance, material balance/stock akurasi, atau penurunan customer complaint), 'Keduanya', atau 'Tidak Ada'.
 PENTING ANTI-MANIPULASI: Anda DILARANG KERAS melabeli 'Hard Saving' jika dokumen HANYA MENCANTUMKAN ANGKA TOTAL (misal 'Saving Rp 200 Juta') tanpa ada rincian perhitungan atau parameter sebelum/sesudah yang jelas. Jika tidak ada rincian yang valid, turunkan statusnya menjadi 'Tidak Yakin' atau 'Virtual/Soft Saving'.
 WAJIB JELASKAN ALASAN MENGAPA Anda mengkategorikannya sebagai Hard/Soft Saving di kolom keterangan. JANGAN KOSONGKAN keterangan untuk Jenis Saving.
+
+BEDAKAN SAVING AKTUAL vs PROYEKSI: untuk setiap kategori berstatus 'IYA' dan untuk 'Jenis Saving', tulis di keterangan (a) parameter hitungan yang tertulis di dokumen (jumlah, tarif/harga, periode) atau 'TIDAK ADA RINCIAN', dan (b) apakah angkanya AKTUAL (ada data sebelum/sesudah yang terukur) atau PROYEKSI/estimasi. Saving yang hanya proyeksi tanpa data realisasi tidak boleh berstatus 'Hard Saving' (turunkan ke 'Virtual/Soft Saving' atau 'Tidak Yakin'). Untuk saving manpower, sebutkan apakah dokumen menjelaskan nasib operator yang berkurang (dikeluarkan dari biaya atau dialihkan ke pekerjaan lain) atau tidak menjelaskannya.
 
 Hasil 'Jenis Saving' ditulis sebagai baris ke-15 (setelah ke-14 baris kategori impact), dengan kategori 'Jenis Saving'. Contoh baris ke-15:
 {SKEMA_JENIS_SAVING}
@@ -1333,12 +1508,15 @@ ATURAN:
 - Pilih skor TERTINGGI yang syaratnya benar-benar terpenuhi; jangan membulatkan ke atas. Bila bukti tidak ditemukan, beri skor 0 dan tulis itu di justifikasi.
 - Target/masalah/hasil bisa tertulis IMPLISIT; cek penanda EKSPLISIT/IMPLISIT pada data ekstraksi.
 - Bila titik audit yang relevan berstatus LEMAH/TIDAK KONSISTEN, skor WAJIB diturunkan dan justifikasi menyebut isi temuannya.
+- UJI BALIK: untuk kriteria yang akan diberi skor TERTINGGI, cari satu temuan terkuat yang MENENTANG skor itu dari analisis kritis atau titik audit; bila belum dibantah bukti konkret, turunkan satu tingkat.
 {gate}- Justifikasi 1-2 kalimat berisi ISI dan ANGKA konkret; DILARANG hanya menyebut nomor halaman.
 - "perlu_validasi_manual" = "YA" (dengan "alasan_validasi_manual" 1 kalimat) bila: bukti implisit/bisa diperdebatkan; titik audit terkait LEMAH/TIDAK KONSISTEN atau analisis kritis vs konfirmatif bertentangan; butuh verifikasi kondisi fisik lapangan; atau skor bergantung asumsi karena data kurang. Selain itu "TIDAK" dengan alasan "".
 Rujukan kriteria yang sering butuh cek lapangan (bukan aturan baku):
 {rujukan}
 
 {_ATURAN_KALIBRASI}
+
+{blok_batas_pemeriksaan(nomor)}
 
 KELENGKAPAN OUTPUT: tepat {len(nomor)} objek untuk kriteria nomor {daftar}. "skor" harus ANGKA dari daftar yang diperbolehkan; isi juga bukti_kunci dan kenapa_bukan_lebih_tinggi.
 
@@ -1470,18 +1648,20 @@ def skoring_groq(laporan, raw_verif, kritis, konfirmatif, raw_alur, catatan, lg)
     kurang = [n for n in RUBRIK_META if n not in hasil or not _item_valid(hasil[n])]
     if kurang:
         lg.write(f"⚠️ **Skoring Groq:** kriteria {kurang} belum terisi/valid; mengulang dalam kelompok kecil...")
-        per_tahap = {}
-        for t in TAHAP_GROQ:
-            sisa = [n for n in t["no"] if n in kurang]
-            if sisa:
-                per_tahap[t["kode"]] = (t, sisa)
-        for kode, (t, daftar) in per_tahap.items():
-            for i in range(0, len(daftar), 2):
-                grup = tuple(daftar[i:i + 2])
-                for d in jalankan_tahap(dict(t, no=grup, kode=f"{kode} ulang")):
-                    n = _no_item(d)
-                    if n in grup and (n not in hasil or not _item_valid(hasil[n])):
-                        hasil[n] = d
+        for ukuran in (2, 1):
+            kurang = [n for n in RUBRIK_META if n not in hasil or not _item_valid(hasil[n])]
+            if not kurang:
+                break
+            if ukuran == 1:
+                lg.write(f"⚠️ **Skoring Groq:** kriteria {kurang} masih kosong; mengulang satu per satu...")
+            for t in TAHAP_GROQ:
+                daftar = [n for n in t["no"] if n in kurang]
+                for k in range(0, len(daftar), ukuran):
+                    grup = tuple(daftar[k:k + ukuran])
+                    for d in jalankan_tahap(dict(t, no=grup, kode=f"{t['kode']} ulang")):
+                        n = _no_item(d)
+                        if n in grup and (n not in hasil or not _item_valid(hasil[n])):
+                            hasil[n] = d
         masih = [n for n in RUBRIK_META if n not in hasil or not _item_valid(hasil[n])]
         if masih:
             lg.write(f"⚠️ **Skoring Groq:** kriteria {masih} tetap gagal setelah diulang; dibiarkan kosong untuk juri.")
@@ -1492,9 +1672,10 @@ def skoring_groq(laporan, raw_verif, kritis, konfirmatif, raw_alur, catatan, lg)
 # Kelompok titik audit alur untuk Groq berkuota kecil: (label, titik, bagian ekstraksi yang relevan, kategori verifikasi)
 GRUP_ALUR = [
     ("PLAN-1", ("P1", "P2", "P3"), (1, 2), ("GATE", "5W1H")),
-    ("PLAN-2", ("P4", "P5", "P6", "P7"), (3, 4), ("FOTO",)),
-    ("DO", ("D1", "D2", "D3", "D4"), (4, 5, 6), ("FUP", "FOTO")),
-    ("CHECK-ACT", ("C1", "C2", "A1", "A2", "A3", "A4"), (1, 2, 7, 8), ("FUP",)),
+    ("PLAN-2", ("P4", "P5", "P6", "P7"), (3, 4, 10), ("FOTO",)),
+    ("DO", ("D1", "D2", "D3", "D4"), (4, 5, 6, 10), ("FUP", "FOTO")),
+    ("CHECK", ("C1", "C2"), (1, 2, 7, 10), ("FOTO",)),
+    ("ACT", ("A1", "A2", "A3", "A4"), (1, 5, 8, 10), ("FUP",)),
 ]
 
 
@@ -1524,7 +1705,7 @@ def audit_alur_groq(laporan, raw_verif, catatan, lg):
     catatan.append(f"ℹ️ Kuota Groq {_tpm()} token/menit: audit alur dijalankan per fase ({len(GRUP_ALUR)} panggilan kecil).")
     gabungan, dipakai = [], set()
     for label, kode, bagian, kunci in GRUP_ALUR:
-        mt = min(GROQ_MAX_OUTPUT, 500 + 300 * len(kode))
+        mt = min(GROQ_MAX_OUTPUT, 500 + 380 * len(kode))
         nama = f"Audit Logika {label}"
 
         def bangun(f, kode=kode, bagian=bagian, kunci=kunci, mt=mt):
@@ -1570,11 +1751,16 @@ def jalankan_pipeline(uploaded_file, log):
 
         catatan = []                    # peringatan/error yang ditampilkan di panel diagnostik hasil
         lg = LogGanda(log, catatan)     # log thread utama yang ikut mencatat peringatan
+        groq_alur_on = GROQ_FITUR in ("inti", "semua")
         groq_penuh = GROQ_FITUR == "semua"
-        if not groq_penuh:
+        if GROQ_FITUR == "skoring":
             catatan.append(
                 "ℹ️ Mode hemat Groq (GROQ_FITUR=skoring): Groq hanya menilai rubrik; audit alur, saving, dan umpan balik "
-                "hanya dari Gemini. Set GROQ_FITUR=semua dan GROQ_TPM sesuai tier Anda bila kuota Groq mencukupi."
+                "hanya dari Gemini. Set GROQ_FITUR=inti/semua bila kuota Groq mencukupi."
+            )
+        elif GROQ_FITUR == "inti":
+            catatan.append(
+                "ℹ️ Mode inti Groq (GROQ_FITUR=inti): Groq menilai rubrik dan audit alur; saving dan umpan balik hanya dari Gemini."
             )
 
         def ganda(deskripsi, p_gem, kerja_groq, validator):
@@ -1603,11 +1789,11 @@ def jalankan_pipeline(uploaded_file, log):
         )
 
         # ---- [3/6] Audit benang merah PDCA
-        log.write("🔗 **[3/6] Audit logika PDCA**" + (" (Gemini & Groq paralel)" if groq_penuh else " (Gemini)"))
+        log.write("🔗 **[3/6] Audit logika PDCA**" + (" (Gemini & Groq paralel)" if groq_alur_on else " (Gemini)"))
         v_alur = buat_validator(17, ("no", "verdict"))
-        kerja_alur = (lambda lg2: audit_alur_groq(laporan, raw_verif, catatan, lg2)) if groq_penuh else None
+        kerja_alur = (lambda lg2: audit_alur_groq(laporan, raw_verif, catatan, lg2)) if groq_alur_on else None
         raw_alur_gem, raw_alur_groq = ganda("Audit Logika", prompt_alur(laporan, raw_verif), kerja_alur, v_alur)
-        groq_alur_txt = "OK" if raw_alur_groq else ("DILEWATI" if not groq_penuh else "GAGAL")
+        groq_alur_txt = "OK" if raw_alur_groq else ("DILEWATI" if not groq_alur_on else "GAGAL")
         log.write(f"✅ Audit logika selesai (Gemini: {'OK' if raw_alur_gem else 'GAGAL'}, Groq: {groq_alur_txt})")
 
         # Bila audit alur salah satu AI kosong, pakai milik AI lain agar skoring tidak kehilangan bukti alur.
@@ -1710,10 +1896,22 @@ def simpan_hasil(raw, nama_file):
             )
             ss.log_error.append(f"❌ Skoring {nama}: tidak ada baris rubrik valid (nomor 1-21 dengan skor angka). {detail}")
 
+    for nama, df in (("Gemini", ss.df_rubrik_gemini), ("Groq", ss.df_rubrik_groq)):
+        if not df.empty:
+            ada = {int(n) for n in df.loc[df["skor"].notna(), "no"]}
+            hilang = sorted(set(RUBRIK_META) - ada)
+            if hilang:
+                ss.log_error.append(
+                    f"⚠️ Skoring {nama}: kriteria {hilang} tidak punya skor valid, jadi kolom skor {nama} kosong untuk kriteria itu. "
+                    "Putuskan manual (lihat justifikasi AI lain / Rekomendasi Wasit) atau jalankan ulang."
+                )
+
     ss.df_saving_gemini = buat_df(bersihkan_dan_parse_json(raw["sav_gem"]))
     ss.df_saving_groq = buat_df(bersihkan_dan_parse_json(raw["sav_groq"]))
     ss.df_feedback_gemini = buat_df(bersihkan_dan_parse_json(raw["fb_gem"]))
     ss.df_feedback_groq = buat_df(bersihkan_dan_parse_json(raw["fb_groq"]))
+    ss.df_alur_banding = gabungkan_alur(ss.df_alur_gemini, ss.df_alur_groq)
+    ss.df_saving_banding = gabungkan_saving(ss.df_saving_gemini, ss.df_saving_groq)
 
     ss.transkrip = [
         {"Peran": "Ekstraksi & Visual (Gemini)", "Laporan": f"Fakta:\n{raw['laporan']}\n\nVisual:\n{raw['verif']}"},
@@ -1749,11 +1947,18 @@ def tulis_sheet(writer, df, nama):
     ws.freeze_panes(1, 0)
 
 
-def buat_excel(df_banding_final):
+def buat_excel(df_banding_final, df_alur_final=None, df_saving_final=None):
     ss = st.session_state
+    df_alur_final = ss.df_alur_banding if df_alur_final is None else df_alur_final
+    df_saving_final = ss.df_saving_banding if df_saving_final is None else df_saving_final
+
+    def jumlah_beda(df):
+        return int((df["Hasil Banding"] == "⚠️ Beda").sum()) if df is not None and not df.empty else 0
+
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         final_num = pd.to_numeric(df_banding_final["Skor Final (Juri)"], errors="coerce")
+        belum = int((df_banding_final["Skor Gemini"].isna() | df_banding_final["Skor Groq"].isna()).sum())
         ringkasan = pd.DataFrame(
             [
                 ["File dokumen", ss.nama_file],
@@ -1764,23 +1969,22 @@ def buat_excel(df_banding_final):
                 ["Total skor Groq", ss.total_skor_groq],
                 ["Total skor final (juri)", float(final_num.sum())],
                 ["Kriteria sudah diputuskan juri", f"{int(final_num.notna().sum())} dari {len(df_banding_final)}"],
-                ["Kriteria skor berbeda", int((df_banding_final["Hasil Banding"] == "⚠️ Beda").sum())],
+                ["Kriteria skor berbeda", jumlah_beda(df_banding_final)],
+                ["Kriteria belum dinilai salah satu AI", belum],
+                ["Titik audit alur berbeda", jumlah_beda(df_alur_final)],
+                ["Kategori saving berbeda", jumlah_beda(df_saving_final)],
             ],
             columns=["Item", "Nilai"],
         )
         tulis_sheet(writer, ringkasan, "Ringkasan")
-        tulis_sheet(writer, df_banding_final, "3. Rubrik Perbandingan")
-
         daftar = [
             (ss.df_verifikasi, "1. Verifikasi Visual"),
-            (ss.df_alur_gemini, "2. Alur Logika (Gemini)"),
-            (ss.df_alur_groq, "2. Alur Logika (Groq)"),
-            (ss.df_rubrik_gemini.drop(columns=["perlu_manual"], errors="ignore"), "3a. Rubrik (Gemini)"),
-            (ss.df_rubrik_groq.drop(columns=["perlu_manual"], errors="ignore"), "3b. Rubrik (Groq)"),
-            (ss.df_saving_gemini, "4. Saving (Gemini)"),
-            (ss.df_saving_groq, "4. Saving (Groq)"),
+            (df_alur_final, "2. Alur Perbandingan"),
+            (df_banding_final, "3. Rubrik Perbandingan"),
+            (df_saving_final, "4. Saving Perbandingan"),
             (ss.df_feedback_gemini, "5. Feedback (Gemini)"),
             (ss.df_feedback_groq, "5. Feedback (Groq)"),
+            (pd.DataFrame({"Catatan proses": [str(x) for x in ss.log_error]}), "6. Catatan Proses"),
         ]
         for df, nama in daftar:
             if df is not None and not df.empty:
@@ -1793,34 +1997,14 @@ def buat_excel(df_banding_final):
 # ==========================================
 def tampil_tabel_groq(df):
     """Tabel hasil Groq; beri penjelasan bila kosong karena mode hemat Groq."""
-    if df.empty and GROQ_FITUR == "skoring":
+    if df.empty and GROQ_FITUR in ("skoring", "inti"):
         st.info(
-            "Bagian ini tidak dijalankan di mode hemat Groq (GROQ_FITUR=skoring) agar muat kuota token gratis. "
+            f"Bagian ini tidak dijalankan di mode GROQ_FITUR={GROQ_FITUR} agar muat kuota token Groq. "
             "Set GROQ_FITUR=semua dan GROQ_TPM sesuai tier Groq Anda bila kuotanya lebih besar."
         )
     else:
         st.dataframe(df, **LEBAR)
 
-
-uploaded_file = st.file_uploader("Pilih file PDF Kaizen", type="pdf")
-
-if uploaded_file is not None and not st.session_state.proses_selesai:
-    if st.button("🚀 Mulai Penilaian AI (Gemini + Groq)"):
-        berhasil = False
-        with st.status("🤖 AI Multi-Agent sedang memproses...", expanded=True) as status_box:
-            try:
-                raw = jalankan_pipeline(uploaded_file, status_box)
-                simpan_hasil(raw, uploaded_file.name)
-                st.session_state.proses_selesai = True
-                status_box.update(label="✅ Analisis Dual-AI selesai!", state="complete")
-                berhasil = True
-            except Exception as e:
-                status_box.update(label="❌ Terjadi Kesalahan", state="error")
-                st.error(f"**Pesan error:** `{e}`")
-                with st.expander("🔍 Detail teknis (traceback lengkap)"):
-                    st.code(traceback.format_exc())
-        if berhasil:
-            st.rerun()
 
 # ==========================================
 # 10. HASIL PENILAIAN
@@ -1850,24 +2034,61 @@ if st.session_state.proses_selesai:
             for pesan in ss.log_error:
                 st.markdown(f"- {pesan}")
 
+    if not (ss.df_rubrik_gemini.empty or ss.df_rubrik_groq.empty) and not ss.df_banding.empty:
+        kosong = [
+            int(r["No"]) for _, r in ss.df_banding.iterrows() if pd.isna(r["Skor Gemini"]) or pd.isna(r["Skor Groq"])
+        ]
+        if kosong:
+            st.warning(
+                f"Kriteria {kosong} belum dinilai oleh salah satu AI (kolom skornya kosong). "
+                "Putuskan manual atau jalankan ulang; penyebabnya ada di 'Catatan proses'."
+            )
+
     st.subheader("🔍 1. Fakta Observasi: Verifikasi Kelayakan, 5W1H & FUP")
     st.caption("Fakta dasar yang diekstrak oleh Gemini (sebagai Mata) dan dipakai bersama oleh kedua AI.")
     st.data_editor(ss.df_verifikasi, num_rows="dynamic", key="tbl_verifikasi", **LEBAR)
 
     st.subheader("🔗 2. Audit Konsistensi Metodologi PDCA (Golden Thread)")
-    t1, t2 = st.tabs(["🤖 Evaluasi GEMINI", "🚀 Evaluasi GROQ"])
-    with t1:
-        st.dataframe(ss.df_alur_gemini, **LEBAR)
-    with t2:
-        tampil_tabel_groq(ss.df_alur_groq)
+    st.caption(
+        "Verdict Gemini dan Groq berdampingan dalam satu tabel. 'Verdict Acuan' = yang TERKETAT dari kedua AI; "
+        "titik yang berbeda sebaiknya dicek juri (lihat kolom temuan kedua AI)."
+    )
+    if ss.df_alur_banding.empty:
+        edited_alur = ss.df_alur_banding
+        st.info("Audit alur belum tersedia dari kedua AI. Lihat 'Catatan proses' dan 'Transkrip Lengkap'.")
+    else:
+        d_alur = ss.df_alur_banding
+        edited_alur = st.data_editor(
+            d_alur,
+            key="tbl_alur_banding",
+            disabled=[c for c in d_alur.columns if c != "Catatan Validator"],
+            hide_index=True,
+            column_config={
+                "No": st.column_config.TextColumn(width="small"),
+                "Fase": st.column_config.TextColumn(width="small"),
+                "Tahap": st.column_config.TextColumn(width="medium"),
+                "Verdict Gemini": st.column_config.TextColumn(width="small"),
+                "Verdict Groq": st.column_config.TextColumn(width="small"),
+                "Hasil Banding": st.column_config.TextColumn(width="small"),
+                "Verdict Acuan (terketat)": st.column_config.TextColumn(width="small"),
+                "Catatan Validator": st.column_config.TextColumn(width="medium"),
+                "Temuan Gemini": st.column_config.TextColumn(width="large"),
+                "Temuan Groq": st.column_config.TextColumn(width="large"),
+            },
+            **LEBAR,
+        )
+        a1, a2, a3 = st.columns(3)
+        a1.metric("Titik Audit Berbeda", int((d_alur["Hasil Banding"] == "⚠️ Beda").sum()))
+        a2.metric("Titik Bermasalah (acuan terketat)", int(d_alur["Verdict Acuan (terketat)"].isin(["LEMAH", "TIDAK KONSISTEN"]).sum()))
+        a3.metric("Titik Dinilai Lengkap", f"{int((d_alur['Hasil Banding'] != '❓ Data tidak lengkap').sum())} dari {len(d_alur)}")
 
     st.subheader("📝 3. Tabel Validasi Rubrik (Keputusan Akhir)")
     st.caption(
-        "Tab pertama menampilkan skor Gemini dan Groq berdampingan dalam satu tabel. "
+        "Skor Gemini dan Groq berdampingan dalam satu tabel. "
         "'Skor Final (Juri)' otomatis terisi bila kedua AI sepakat; bila berbeda, kolom dibiarkan kosong untuk Anda putuskan — "
         "kolom 'Rekomendasi Wasit' membantu: Gemini membaca ulang PDF khusus untuk kriteria yang berbeda."
     )
-    tab_banding, tab_gem, tab_groq = st.tabs(["📊 Perbandingan (1 Tabel)", "🤖 Detail GEMINI", "🚀 Detail GROQ"])
+    tab_banding = st.container()
 
     with tab_banding:
         df_b = ss.df_banding
@@ -1916,19 +2137,38 @@ if st.session_state.proses_selesai:
         if salah:
             st.warning(f"Skor final di luar pilihan rubrik pada kriteria nomor: {salah}")
 
-    with tab_gem:
-        st.metric("Total Skor Rubrik (Gemini)", f"{ss.total_skor_gemini:.0f}")
-        st.dataframe(ss.df_rubrik_gemini.drop(columns=["perlu_manual"], errors="ignore"), **LEBAR)
-    with tab_groq:
-        st.metric("Total Skor Rubrik (Groq)", f"{ss.total_skor_groq:.0f}")
-        st.dataframe(ss.df_rubrik_groq.drop(columns=["perlu_manual"], errors="ignore"), **LEBAR)
-
-    st.subheader("💰 4. Tabel Validasi Impact & Saving (14 Kategori)")
-    s1, s2 = st.tabs(["🤖 Analisis Saving GEMINI", "🚀 Analisis Saving GROQ"])
-    with s1:
-        st.dataframe(ss.df_saving_gemini, **LEBAR)
-    with s2:
-        tampil_tabel_groq(ss.df_saving_groq)
+    st.subheader("💰 4. Tabel Validasi Impact & Saving (14 Kategori + Jenis Saving)")
+    st.caption(
+        "Status Gemini dan Groq berdampingan dalam satu tabel. 'Status Final (Juri)' otomatis terisi bila kedua AI sepakat; "
+        "bila berbeda, kolom dibiarkan kosong untuk Anda putuskan."
+    )
+    if ss.df_saving_banding.empty:
+        edited_saving = ss.df_saving_banding
+        st.info("Analisis saving belum tersedia dari kedua AI. Lihat 'Catatan proses' dan 'Transkrip Lengkap'.")
+    else:
+        d_sav = ss.df_saving_banding
+        edited_saving = st.data_editor(
+            d_sav,
+            key="tbl_saving_banding",
+            disabled=[c for c in d_sav.columns if c not in ("Status Final (Juri)", "Catatan Validator")],
+            hide_index=True,
+            column_config={
+                "Kategori": st.column_config.TextColumn(width="medium"),
+                "Status Gemini": st.column_config.TextColumn(width="small"),
+                "Status Groq": st.column_config.TextColumn(width="small"),
+                "Hasil Banding": st.column_config.TextColumn(width="small"),
+                "Status Final (Juri)": st.column_config.TextColumn(
+                    width="small", help="Isi sesuai keputusan juri: IYA / TIDAK / TIDAK YAKIN; untuk Jenis Saving: Hard Saving / Virtual/Soft Saving / Keduanya / Tidak Ada."
+                ),
+                "Catatan Validator": st.column_config.TextColumn(width="medium"),
+                "Keterangan Gemini": st.column_config.TextColumn(width="large"),
+                "Keterangan Groq": st.column_config.TextColumn(width="large"),
+            },
+            **LEBAR,
+        )
+        v1, v2 = st.columns(2)
+        v1.metric("Kategori Saving Berbeda", int((d_sav["Hasil Banding"] == "⚠️ Beda").sum()))
+        v2.metric("Sudah Diputuskan", f"{int((edited_saving['Status Final (Juri)'].astype(str).str.strip() != '').sum())} dari {len(edited_saving)}")
 
     st.subheader("💬 5. Feedback & Saran untuk Peserta")
     f1, f2 = st.tabs(["🤖 Saran GEMINI", "🚀 Saran GROQ"])
@@ -1948,7 +2188,7 @@ if st.session_state.proses_selesai:
     with col1:
         st.download_button(
             label="📥 Unduh Laporan Perbandingan Lengkap (Excel)",
-            data=buat_excel(edited_banding),
+            data=buat_excel(edited_banding, edited_alur, edited_saving),
             file_name=f"Laporan_Perbandingan_{nama_aman}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
