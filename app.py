@@ -1,3 +1,4 @@
+import difflib
 import io
 import json
 import os
@@ -313,6 +314,7 @@ _DEFAULTS = {
     "transkrip": [],
     "log_error": [],
     "konteks_groq": {},
+    "df_alur_banding": pd.DataFrame(), "df_saving_banding": pd.DataFrame(), "df_feedback_banding": pd.DataFrame(),
     "nama_file": "Dokumen_Kaizen",
 }
 for _k, _val in _DEFAULTS.items():
@@ -651,6 +653,149 @@ def gabungkan_rubrik(df_gem, df_groq):
     df = pd.DataFrame(baris)
     df["Skor Final (Juri)"] = pd.to_numeric(df["Skor Final (Juri)"], errors="coerce")
     return df
+
+
+# ==========================================
+# 5b. PENGGABUNGAN HASIL GEMINI vs GROQ (1 TABEL PER TOPIK)
+# ==========================================
+ALUR_KODE = (
+    [f"P{i}" for i in range(1, 8)] + [f"D{i}" for i in range(1, 5)]
+    + [f"C{i}" for i in range(1, 3)] + [f"A{i}" for i in range(1, 5)]
+)
+FEEDBACK_KATEGORI = [
+    "Struktur & Kejelasan Penulisan",
+    "Perumusan Problem Statement",
+    "Kesesuaian Goal/Target dengan Objective Awal",
+    "Kedalaman Analisis Akar Masalah",
+    "Kekuatan Bukti & Data Pendukung",
+    "Standardisasi & Keberlanjutan",
+]
+
+
+def _baris_dict(df):
+    return [] if df is None or df.empty else df.to_dict("records")
+
+
+def _alias(row, *nama, default=""):
+    for n in nama:
+        v = row.get(n)
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            continue
+        if str(v).strip() != "":
+            return v
+    return default
+
+
+def _norm_kunci(x):
+    return re.sub(r"[\s/_\-&]+", "", str(x or "").lower())
+
+
+def _ke_kanon(nama, kanon):
+    """Petakan nama kategori dari model ke nama baku (toleran beda spasi/ejaan kecil). None jika tak cocok."""
+    n = _norm_kunci(nama)
+    if not n:
+        return None
+    peta = {_norm_kunci(k): k for k in kanon}
+    if n in peta:
+        return peta[n]
+    cocok = difflib.get_close_matches(n, list(peta), n=1, cutoff=0.75)
+    return peta[cocok[0]] if cocok else None
+
+
+def _hasil_banding(a, b):
+    a, b = str(a or "").strip().upper(), str(b or "").strip().upper()
+    if not a or not b:
+        return "❓ Data tidak lengkap"
+    return "✅ Sama" if a == b else "⚠️ Beda"
+
+
+def gabungkan_alur(df_gem, df_groq):
+    peta = {"Gemini": {}, "Groq": {}}
+    for nama, df in (("Gemini", df_gem), ("Groq", df_groq)):
+        for r in _baris_dict(df):
+            k = str(_alias(r, "no", "No", "kode")).strip().upper()
+            if k and k not in peta[nama]:
+                peta[nama][k] = r
+    semua = set(peta["Gemini"]) | set(peta["Groq"])
+    kunci = [k for k in ALUR_KODE if k in semua] + sorted(k for k in semua if k not in ALUR_KODE)
+    baris = []
+    for k in kunci:
+        rg, rq = peta["Gemini"].get(k, {}), peta["Groq"].get(k, {})
+        vg = str(_alias(rg, "verdict", "status")).strip().upper()
+        vq = str(_alias(rq, "verdict", "status")).strip().upper()
+        baris.append({
+            "No": k,
+            "Fase": _alias(rg, "fase", default=_alias(rq, "fase")),
+            "Tahap": _alias(rg, "tahap", default=_alias(rq, "tahap")),
+            "Verdict Gemini": vg,
+            "Verdict Groq": vq,
+            "Hasil Banding": _hasil_banding(vg, vq),
+            "Temuan Gemini": _alias(rg, "temuan", "keterangan"),
+            "Temuan Groq": _alias(rq, "temuan", "keterangan"),
+        })
+    kolom = ["No", "Fase", "Tahap", "Verdict Gemini", "Verdict Groq", "Hasil Banding", "Temuan Gemini", "Temuan Groq"]
+    return bersihkan_sel(pd.DataFrame(baris, columns=kolom))
+
+
+def gabungkan_saving(df_gem, df_groq):
+    data = {"Gemini": {}, "Groq": {}}
+    ekstra = {}  # kunci ternormalisasi -> nama tampil (mis. "Jenis Saving")
+    for nama, df in (("Gemini", df_gem), ("Groq", df_groq)):
+        for r in _baris_dict(df):
+            kat = str(_alias(r, "kategori", "Kategori")).strip()
+            if not kat:
+                continue
+            baku = _ke_kanon(kat, KATEGORI_IMPACT_14) or ekstra.setdefault(_norm_kunci(kat), kat)
+            data[nama].setdefault(baku, r)
+    semua = set(data["Gemini"]) | set(data["Groq"])
+    kunci = [k for k in KATEGORI_IMPACT_14 if k in semua] + [v for v in ekstra.values() if v in semua]
+    baris = []
+    for k in kunci:
+        rg, rq = data["Gemini"].get(k, {}), data["Groq"].get(k, {})
+        sg = str(_alias(rg, "status")).strip()
+        sq = str(_alias(rq, "status")).strip()
+        baris.append({
+            "Kategori": k,
+            "Status Gemini": sg,
+            "Status Groq": sq,
+            "Hasil Banding": _hasil_banding(sg, sq),
+            "Keterangan Gemini": _alias(rg, "keterangan", "alasan", "catatan"),
+            "Keterangan Groq": _alias(rq, "keterangan", "alasan", "catatan"),
+        })
+    kolom = ["Kategori", "Status Gemini", "Status Groq", "Hasil Banding", "Keterangan Gemini", "Keterangan Groq"]
+    return bersihkan_sel(pd.DataFrame(baris, columns=kolom))
+
+
+def gabungkan_feedback(df_gem, df_groq):
+    data = {"Gemini": {}, "Groq": {}}
+    for nama, df in (("Gemini", df_gem), ("Groq", df_groq)):
+        n_ekstra = 0
+        for r in _baris_dict(df):
+            kat = str(_alias(r, "kategori", "Kategori")).strip()
+            baku = _ke_kanon(kat, FEEDBACK_KATEGORI)
+            if baku is None:
+                n_ekstra += 1
+                baku = f"Catatan Tambahan {n_ekstra}"
+            data[nama].setdefault(baku, r)
+    semua = set(data["Gemini"]) | set(data["Groq"])
+    kunci = [k for k in FEEDBACK_KATEGORI if k in semua] + sorted(k for k in semua if k not in FEEDBACK_KATEGORI)
+    baris = []
+    for k in kunci:
+        rg, rq = data["Gemini"].get(k, {}), data["Groq"].get(k, {})
+        baris.append({
+            "Kategori": k,
+            "Kekuatan (Gemini)": _alias(rg, "kekuatan"),
+            "Kekuatan (Groq)": _alias(rq, "kekuatan"),
+            "Area Perbaikan (Gemini)": _alias(rg, "area_perbaikan", "area perbaikan"),
+            "Area Perbaikan (Groq)": _alias(rq, "area_perbaikan", "area perbaikan"),
+            "Saran Konkret (Gemini)": _alias(rg, "saran_konkret", "saran konkret", "saran"),
+            "Saran Konkret (Groq)": _alias(rq, "saran_konkret", "saran konkret", "saran"),
+        })
+    kolom = [
+        "Kategori", "Kekuatan (Gemini)", "Kekuatan (Groq)", "Area Perbaikan (Gemini)", "Area Perbaikan (Groq)",
+        "Saran Konkret (Gemini)", "Saran Konkret (Groq)",
+    ]
+    return bersihkan_sel(pd.DataFrame(baris, columns=kolom))
 
 
 # ==========================================
@@ -1273,6 +1418,10 @@ def simpan_hasil(raw, nama_file):
     ss.df_feedback_gemini = buat_df(bersihkan_dan_parse_json(raw["fb_gem"]))
     ss.df_feedback_groq = buat_df(bersihkan_dan_parse_json(raw["fb_groq"]))
 
+    ss.df_alur_banding = gabungkan_alur(ss.df_alur_gemini, ss.df_alur_groq)
+    ss.df_saving_banding = gabungkan_saving(ss.df_saving_gemini, ss.df_saving_groq)
+    ss.df_feedback_banding = gabungkan_feedback(ss.df_feedback_gemini, ss.df_feedback_groq)
+
     ss.transkrip = [
         {"Peran": "Ekstraksi & Visual (Gemini)", "Laporan": f"Fakta:\n{raw['laporan']}\n\nVisual:\n{raw['verif']}"},
         {"Peran": "Audit Logika (Gemini)", "Laporan": raw["alur_gem"]},
@@ -1325,6 +1474,22 @@ def lengkapi_skor_groq(kosong):
             return False
 
 
+def tampilkan_banding(df, pesan_kosong="Belum ada data untuk ditampilkan."):
+    """Tampilkan tabel perbandingan Gemini vs Groq + ringkasan jumlah yang sama/beda."""
+    if df is None or df.empty:
+        st.info(pesan_kosong)
+        return
+    kata_teks = ("Temuan", "Keterangan", "Kekuatan", "Area", "Saran")
+    cfg = {c: st.column_config.TextColumn(width="large") for c in df.columns if any(k in c for k in kata_teks)}
+    st.dataframe(df, hide_index=True, column_config=cfg, **LEBAR)
+    if "Hasil Banding" in df.columns:
+        h = df["Hasil Banding"]
+        st.caption(
+            f"✅ Sama: {int((h == '✅ Sama').sum())}  ·  ⚠️ Beda: {int((h == '⚠️ Beda').sum())}  ·  "
+            f"❓ Data tidak lengkap: {int(h.astype(str).str.startswith('❓').sum())}"
+        )
+
+
 # ==========================================
 # 8. EXPORT EXCEL
 # ==========================================
@@ -1333,15 +1498,30 @@ def tulis_sheet(writer, df, nama):
     df = bersihkan_sel(df)
     df.to_excel(writer, sheet_name=nama, index=False)
     ws = writer.sheets[nama]
-    wrap = writer.book.add_format({"text_wrap": True, "valign": "top"})
-    head = writer.book.add_format(
-        {"bold": True, "bg_color": "#A3B9D2", "font_color": "#FFFFFF", "text_wrap": True, "valign": "vcenter"}
-    )
+    wb = writer.book
+    wrap = wb.add_format({"text_wrap": True, "valign": "top"})
+    dasar = {"bold": True, "font_color": "#FFFFFF", "text_wrap": True, "valign": "vcenter"}
+    head = wb.add_format({**dasar, "bg_color": "#7F8C8D"})
+    head_gem = wb.add_format({**dasar, "bg_color": "#5C7C99"})   # biru = Gemini
+    head_groq = wb.add_format({**dasar, "bg_color": "#C98B4B"})  # oranye = Groq
     for i, col in enumerate(df.columns):
-        ws.write(0, i, str(col), head)
-        panjang = max([len(str(col))] + [len(str(x)) for x in df[col].head(200)])
+        teks = str(col)
+        ws.write(0, i, teks, head_gem if "Gemini" in teks else head_groq if "Groq" in teks else head)
+        panjang = max([len(teks)] + [len(str(x)) for x in df[col].head(200)])
         ws.set_column(i, i, min(max(panjang + 2, 8), 60), wrap)
+        if teks == "Hasil Banding" and len(df):
+            for kata, warna in (("Beda", "#FADBD8"), ("Sama", "#D5F5E3"), ("tidak lengkap", "#FCF3CF")):
+                ws.conditional_format(
+                    1, i, len(df), i,
+                    {"type": "text", "criteria": "containing", "value": kata, "format": wb.add_format({"bg_color": warna})},
+                )
     ws.freeze_panes(1, 0)
+
+
+def _hitung_beda(df):
+    if df is None or df.empty or "Hasil Banding" not in df.columns:
+        return 0
+    return int((df["Hasil Banding"] == "⚠️ Beda").sum())
 
 
 def buat_excel(df_banding_final):
@@ -1360,24 +1540,20 @@ def buat_excel(df_banding_final):
                 ["Total skor final (juri)", float(final_num.sum())],
                 ["Kriteria sudah diputuskan juri", f"{int(final_num.notna().sum())} dari {len(df_banding_final)}"],
                 ["Kriteria skor berbeda", int((df_banding_final["Hasil Banding"] == "⚠️ Beda").sum())],
+                ["Titik audit logika berbeda verdict", _hitung_beda(ss.df_alur_banding)],
+                ["Kategori saving berbeda status", _hitung_beda(ss.df_saving_banding)],
             ],
             columns=["Item", "Nilai"],
         )
         tulis_sheet(writer, ringkasan, "Ringkasan")
-        tulis_sheet(writer, df_banding_final, "3. Rubrik Perbandingan")
-
-        daftar = [
+        urutan = [
             (ss.df_verifikasi, "1. Verifikasi Visual"),
-            (ss.df_alur_gemini, "2. Alur Logika (Gemini)"),
-            (ss.df_alur_groq, "2. Alur Logika (Groq)"),
-            (ss.df_rubrik_gemini.drop(columns=["perlu_manual"], errors="ignore"), "3a. Rubrik (Gemini)"),
-            (ss.df_rubrik_groq.drop(columns=["perlu_manual"], errors="ignore"), "3b. Rubrik (Groq)"),
-            (ss.df_saving_gemini, "4. Saving (Gemini)"),
-            (ss.df_saving_groq, "4. Saving (Groq)"),
-            (ss.df_feedback_gemini, "5. Feedback (Gemini)"),
-            (ss.df_feedback_groq, "5. Feedback (Groq)"),
+            (ss.df_alur_banding, "2. Alur Logika Perbandingan"),
+            (df_banding_final, "3. Rubrik Perbandingan"),
+            (ss.df_saving_banding, "4. Saving Perbandingan"),
+            (ss.df_feedback_banding, "5. Feedback Perbandingan"),
         ]
-        for df, nama in daftar:
+        for df, nama in urutan:
             if df is not None and not df.empty:
                 tulis_sheet(writer, df, nama)
     return output.getvalue()
@@ -1449,11 +1625,8 @@ if st.session_state.proses_selesai:
     st.data_editor(ss.df_verifikasi, num_rows="dynamic", key="tbl_verifikasi", **LEBAR)
 
     st.subheader("🔗 2. Audit Konsistensi Metodologi PDCA (Golden Thread)")
-    t1, t2 = st.tabs(["🤖 Evaluasi GEMINI", "🚀 Evaluasi GROQ"])
-    with t1:
-        st.dataframe(ss.df_alur_gemini, **LEBAR)
-    with t2:
-        st.dataframe(ss.df_alur_groq, **LEBAR)
+    st.caption("Verdict Gemini dan Groq untuk tiap titik sambungan PDCA, berdampingan dalam satu tabel.")
+    tampilkan_banding(ss.df_alur_banding)
 
     st.subheader("📝 3. Tabel Validasi Rubrik (Keputusan Akhir)")
     st.caption(
@@ -1515,18 +1688,12 @@ if st.session_state.proses_selesai:
         st.dataframe(ss.df_rubrik_groq.drop(columns=["perlu_manual"], errors="ignore"), **LEBAR)
 
     st.subheader("💰 4. Tabel Validasi Impact & Saving (14 Kategori)")
-    s1, s2 = st.tabs(["🤖 Analisis Saving GEMINI", "🚀 Analisis Saving GROQ"])
-    with s1:
-        st.dataframe(ss.df_saving_gemini, **LEBAR)
-    with s2:
-        st.dataframe(ss.df_saving_groq, **LEBAR)
+    st.caption("Status dan keterangan dampak per kategori dari Gemini dan Groq, berdampingan dalam satu tabel.")
+    tampilkan_banding(ss.df_saving_banding)
 
     st.subheader("💬 5. Feedback & Saran untuk Peserta")
-    f1, f2 = st.tabs(["🤖 Saran GEMINI", "🚀 Saran GROQ"])
-    with f1:
-        st.dataframe(ss.df_feedback_gemini, **LEBAR)
-    with f2:
-        st.dataframe(ss.df_feedback_groq, **LEBAR)
+    st.caption("Umpan balik untuk peserta dari kedua AI per kategori, berdampingan dalam satu tabel.")
+    tampilkan_banding(ss.df_feedback_banding)
 
     with st.expander("📜 Lihat Transkrip Lengkap"):
         for entri in ss.transkrip:
