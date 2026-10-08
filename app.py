@@ -62,7 +62,7 @@ st.markdown(
 st.title("🏢 Portal Validasi Kaizen - Dept. MEX")
 st.markdown(
     "<p style='text-align: center; color: #7F8C8D; font-size: 1.1rem; font-weight: 400; margin-bottom: 2rem;'>Unggah"
-    " Sistem evaluasi dokumen, Gemini vs Groq. Dokumen yang diupload tidak akan disimpan di database, jadi pastikan output data sudah di download secara manual sebelum menutup aplikasi ini.</p>",
+    " dokumen, Gemini vs Groq. Dokumen yang diupload tidak akan disimpan di database, jadi pastikan output data sudah di download secara manual sebelum menutup aplikasi ini.</p>",
     unsafe_allow_html=True,
 )    
 st.divider()
