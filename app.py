@@ -1566,8 +1566,9 @@ uploaded_file = st.file_uploader("Pilih file PDF Kaizen", type="pdf")
 
 if uploaded_file is not None and not st.session_state.proses_selesai:
     st.caption(
-        "⏱️ Estimasi 10–15 menit per dokumen."
-        "Progres bisa dipantau di panel di bawah. Apabila ada kegagalan sistem, mohon berikan jeda waktu untuk "request er menit" pada sistem API."
+        "⏱️ Estimasi 10–15 menit per dokumen. "
+        "Progres bisa dipantau di panel di bawah. Apabila ada kegagalan sistem, mohon berikan jeda waktu "
+        "untuk limit 'request per menit' pada sistem API."
     )
     if st.button("🚀 Mulai Penilaian"):
         berhasil = False
