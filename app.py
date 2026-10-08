@@ -59,12 +59,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🏢 Portal Validasi Kaizen (Dual-AI Judge)")
+st.title("🏢 Portal Validasi Kaizen - Dept. MEX")
 st.markdown(
     "<p style='text-align: center; color: #7F8C8D; font-size: 1.1rem; font-weight: 400; margin-bottom: 2rem;'>Unggah"
-    " dokumen evaluasi, bandingkan analisis Gemini vs Groq secara <i>apple-to-apple</i>, lalu lakukan validasi akhir secara manual.</p>",
+    " Sistem evaluasi dokumen, Gemini vs Groq. Dokumen yang diupload tidak akan disimpan di database, jadi pastikan output data sudah di download secara manual sebelum menutup aplikasi ini.</p>",
     unsafe_allow_html=True,
-)
+)    
 st.divider()
 
 # Kompatibilitas parameter lebar tabel antar versi Streamlit
@@ -1566,12 +1566,12 @@ uploaded_file = st.file_uploader("Pilih file PDF Kaizen", type="pdf")
 
 if uploaded_file is not None and not st.session_state.proses_selesai:
     st.caption(
-        "⏱️ Estimasi 10–15 menit per dokumen: Groq (free tier) dibatasi 8K token/menit sehingga dikerjakan bertahap. "
-        "Progres bisa dipantau di panel di bawah."
+        "⏱️ Estimasi 10–15 menit per dokumen. "
+        "Progres bisa dipantau di panel di bawah. Apabila ada kegagalan sistem, mohon berikan jeda waktu untuk "request er menit" pada sistem API."
     )
-    if st.button("🚀 Mulai Penilaian AI (Gemini + Groq)"):
+    if st.button("🚀 Mulai Penilaian"):
         berhasil = False
-        with st.status("🤖 AI Multi-Agent sedang memproses...", expanded=True) as status_box:
+        with st.status("🤖 Sistem sedang memproses...", expanded=True) as status_box:
             try:
                 raw = jalankan_pipeline(uploaded_file, status_box)
                 simpan_hasil(raw, uploaded_file.name)
