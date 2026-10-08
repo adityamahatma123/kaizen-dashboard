@@ -126,7 +126,7 @@ class GroqPacer:
         self.kunci = threading.Lock()
         self.riwayat = deque()  # entri: [waktu, jumlah_token]
         self.harian = {}
-        self._habis_tanggal = None
+        self._habis_sampai = 0.0
 
     @staticmethod
     def _hari():
@@ -161,10 +161,10 @@ class GroqPacer:
             entri[1] = 0
 
     def tandai_habis(self):
-        self._habis_tanggal = self._hari()
+        self._habis_sampai = time.time() + 1800  # coba lagi setelah 30 menit
 
     def habis(self):
-        return self._habis_tanggal == self._hari()
+        return time.time() < self._habis_sampai
 
     def pemakaian_hari_ini(self):
         return self.harian.get(self._hari(), 0)
@@ -312,6 +312,7 @@ _DEFAULTS = {
     "df_feedback_gemini": pd.DataFrame(), "df_feedback_groq": pd.DataFrame(),
     "transkrip": [],
     "log_error": [],
+    "konteks_groq": {},
     "nama_file": "Dokumen_Kaizen",
 }
 for _k, _val in _DEFAULTS.items():
@@ -512,7 +513,21 @@ def bersihkan_dan_parse_json(teks_raw):
                 if isinstance(v, list):
                     return [d for d in v if isinstance(d, dict)]
             return [data]
-    return []
+    # Fallback terakhir: JSON rusak/terpotong → selamatkan objek-objek yang utuh
+    dec = json.JSONDecoder()
+    i, objek = 0, []
+    while True:
+        i = teks.find("{", i)
+        if i == -1:
+            break
+        try:
+            obj, j = dec.raw_decode(teks, i)
+            if isinstance(obj, dict):
+                objek.append(obj)
+            i = j
+        except json.JSONDecodeError:
+            i += 1
+    return objek
 
 
 def bersihkan_sel(df):
@@ -1054,24 +1069,38 @@ def alur_relevan(alur_items, nomor):
     return json.dumps(pilih, ensure_ascii=False) if pilih else ""
 
 
-def groq_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, log):
+def groq_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, log, hanya_kriteria=None):
     alur_items = bersihkan_dan_parse_json(alur_json)
-    hasil = []
-    for i, grup in enumerate(GRUP_SKORING, 1):
-        nomor = grup["kriteria"]
+    bobot = {"§LAPORAN§": 6, "§VERIF§": 2, "§ALUR§": 2, "§KRITIS§": 1, "§KONFIRM§": 1}
+
+    def jalankan(nomor, bagian_ids, judul):
         konteks = {
-            "§LAPORAN§": ambil_bagian(laporan, bagian, grup["bagian"]),
+            "§LAPORAN§": ambil_bagian(laporan, bagian, bagian_ids),
             "§VERIF§": verif,
             "§ALUR§": alur_relevan(alur_items, nomor) or "(tidak tersedia)",
             "§KRITIS§": kritis,
             "§KONFIRM§": konfirmatif,
         }
-        bobot = {"§LAPORAN§": 6, "§VERIF§": 2, "§ALUR§": 2, "§KRITIS§": 1, "§KONFIRM§": 1}
         p = muat_di_budget(prompt_skoring_ringkas(nomor), konteks, bobot, GROQ_OUT_SKORING)
+        items = _groq_json(p, judul, log, max_output=GROQ_OUT_SKORING)
+        return [it for it in items if _ke_int(it.get("no", it.get("No"))) in nomor]
+
+    hasil = []
+    for i, grup in enumerate(GRUP_SKORING, 1):
+        nomor = [n for n in grup["kriteria"] if hanya_kriteria is None or n in hanya_kriteria]
+        if not nomor:
+            continue
         judul = f"Skoring Rubrik {i}/{len(GRUP_SKORING)} (kriteria {nomor[0]}-{nomor[-1]})"
-        hasil += _groq_json(p, judul, log, max_output=GROQ_OUT_SKORING)
+        items = jalankan(nomor, grup["bagian"], judul)
+        ada = {_ke_int(it.get("no", it.get("No"))) for it in items}
+        kurang = [n for n in nomor if n not in ada]
+        if kurang and not PACER.habis():
+            log.write(f"🔁 **Skoring (Groq):** kriteria {kurang} belum terisi, mencoba ulang khusus kriteria itu...")
+            items += jalankan(kurang, grup["bagian"], judul + " — ulang")
+        hasil += items
+    target = [n for g in GRUP_SKORING for n in g["kriteria"] if hanya_kriteria is None or n in hanya_kriteria]
     ada = {_ke_int(it.get("no", it.get("No"))) for it in hasil}
-    hilang = [n for g in GRUP_SKORING for n in g["kriteria"] if n not in ada]
+    hilang = [n for n in target if n not in ada]
     if hilang:
         log.write(f"⚠️ **Skoring (Groq):** kriteria belum terisi: {hilang}")
     return json.dumps(hasil, ensure_ascii=False) if hasil else ""
@@ -1208,6 +1237,10 @@ def jalankan_pipeline(uploaded_file, log):
             "sav_gem": raw_sav_gem, "sav_groq": raw_sav_groq,
             "fb_gem": raw_fb_gem, "fb_groq": raw_fb_groq,
             "catatan": catatan,
+            "konteks_groq": {
+                "laporan": laporan, "verif": raw_verif, "kritis": kritis,
+                "konfirmatif": konfirmatif, "alur": alur_groq_pakai,
+            },
         }
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -1226,6 +1259,7 @@ def simpan_hasil(raw, nama_file):
     ss = st.session_state
     ss.nama_file = nama_file
     ss.log_error = raw.get("catatan", [])
+    ss.konteks_groq = raw.get("konteks_groq", {})
     ss.df_verifikasi = buat_df(bersihkan_dan_parse_json(raw["verif"]))
     ss.df_alur_gemini = buat_df(bersihkan_dan_parse_json(raw["alur_gem"]))
     ss.df_alur_groq = buat_df(bersihkan_dan_parse_json(raw["alur_groq"]))
@@ -1251,6 +1285,44 @@ def simpan_hasil(raw, nama_file):
         {"Peran": "Feedback (Gemini)", "Laporan": raw["fb_gem"]},
         {"Peran": "Feedback (Groq)", "Laporan": raw["fb_groq"]},
     ]
+
+
+def _nomor_ada(df):
+    if df is None or df.empty:
+        return set()
+    return set(pd.to_numeric(df["no"], errors="coerce").dropna().astype(int))
+
+
+def lengkapi_skor_groq(kosong):
+    """Jalankan ulang HANYA kriteria Groq yang kosong, lalu gabungkan ke tabel yang sudah ada."""
+    ss = st.session_state
+    k = ss.konteks_groq
+    with st.status("🔁 Melengkapi skor Groq yang kosong...", expanded=True) as sb:
+        try:
+            bagian = pecah_bagian_ekstraksi(k["laporan"])
+            raw_baru = groq_skoring(
+                k["laporan"], bagian, k["verif"], k["kritis"], k["konfirmatif"], k["alur"], sb,
+                hanya_kriteria=set(kosong),
+            )
+            items_baru = bersihkan_dan_parse_json(raw_baru)
+            if not items_baru:
+                sb.update(label="❌ Groq belum berhasil mengisi kriteria yang kosong (lihat pesan di atas)", state="error")
+                return False
+            df_baru, _ = format_tabel_rubrik(items_baru)
+            df_all = pd.concat([ss.df_rubrik_groq, df_baru], ignore_index=True)
+            df_all["no"] = pd.to_numeric(df_all["no"], errors="coerce").astype(int)
+            df_all = df_all.drop_duplicates("no", keep="last").sort_values("no").reset_index(drop=True)
+            ss.df_rubrik_groq = df_all
+            ss.total_skor_groq = float(pd.to_numeric(df_all["skor"], errors="coerce").sum())
+            ss.df_banding = gabungkan_rubrik(ss.df_rubrik_gemini, ss.df_rubrik_groq)
+            ss.transkrip.append({"Peran": "Skoring Groq (melengkapi)", "Laporan": raw_baru})
+            ss.pop("tbl_rubrik_banding", None)
+            sb.update(label="✅ Selesai", state="complete")
+            return True
+        except Exception as e:
+            sb.update(label="❌ Gagal melengkapi skor", state="error")
+            st.error(f"**Pesan error:** `{e}`")
+            return False
 
 
 # ==========================================
@@ -1345,21 +1417,32 @@ if st.session_state.proses_selesai:
     ss = st.session_state
     st.success("Analisis Dual-AI selesai! Silakan bandingkan penalaran Gemini dan Groq di bawah.")
 
-    if ss.df_rubrik_gemini.empty or ss.df_rubrik_groq.empty:
-        sisi = [n for n, d in (("Gemini", ss.df_rubrik_gemini), ("Groq", ss.df_rubrik_groq)) if d.empty]
-        st.warning(
-            f"Skoring rubrik {' & '.join(sisi)} kosong (gagal/ter-limit atau JSON tidak terbaca). "
-            "Lihat penyebabnya di bawah dan output mentah di 'Transkrip Lengkap'."
+    kosong_gem = [n for n in RUBRIK_META if n not in _nomor_ada(ss.df_rubrik_gemini)]
+    kosong_groq = [n for n in RUBRIK_META if n not in _nomor_ada(ss.df_rubrik_groq)]
+    if kosong_gem or kosong_groq:
+        bagian_pesan = []
+        if kosong_gem:
+            bagian_pesan.append(f"Gemini: kriteria {kosong_gem}")
+        if kosong_groq:
+            bagian_pesan.append(f"Groq: kriteria {kosong_groq}")
+        st.warning("Skor rubrik belum lengkap — " + "; ".join(bagian_pesan) + ".")
+    if ss.log_error:
+        with st.expander("🩺 Catatan & penyebab error dari Gemini/Groq", expanded=bool(kosong_gem or kosong_groq)):
+            for pesan in ss.log_error:
+                st.markdown(f"- {pesan}")
+    elif kosong_gem or kosong_groq:
+        st.info(
+            "Tidak ada error API yang tercatat — artinya model membalas tetapi JSON-nya tidak terbaca. "
+            "Cek 'Transkrip Lengkap' untuk melihat isi balasan mentahnya."
         )
-        if ss.log_error:
-            with st.expander("🩺 Penyebab error dari Gemini/Groq", expanded=True):
-                for pesan in ss.log_error:
-                    st.markdown(f"- {pesan}")
-        else:
-            st.info(
-                "Tidak ada error API yang tercatat — artinya model membalas tetapi JSON-nya tidak terbaca. "
-                "Cek 'Transkrip Lengkap' untuk melihat isi balasan mentahnya."
-            )
+    if kosong_groq and ss.konteks_groq:
+        st.caption(
+            "Tombol ini hanya menjalankan ulang kriteria Groq yang kosong (tanpa mengulang seluruh dokumen). "
+            "Isian 'Skor Final (Juri)' yang sudah Anda ketik akan ter-reset, jadi pakai sebelum mulai memutuskan."
+        )
+        if st.button("🔁 Lengkapi skor Groq yang kosong"):
+            if lengkapi_skor_groq(kosong_groq):
+                st.rerun()
 
     st.subheader("🔍 1. Fakta Observasi: Verifikasi Kelayakan, 5W1H & FUP")
     st.caption("Fakta dasar yang diekstrak oleh Gemini (sebagai Mata) dan dipakai bersama oleh kedua AI.")
