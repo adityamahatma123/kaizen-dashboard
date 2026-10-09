@@ -319,14 +319,14 @@ KATEGORI_IMPACT_14 = [
 # Definisi resmi dari Rubrik 2026 Bagian II (Identifikasi Jenis Kaizen)
 DEFINISI_IMPACT = {
     "Gas / Steam": "mengurangi pemakaian gas/steam, penurunan rasio gas terhadap output, dll.",
-    "Material Balance": "mengurangi selisih material balance.",
+    "Material Balance": "mengurangi selisih penggunaan material aktual terhadap standar BOM (Bill of Material), mis. pemakaian bahan baku/kemasan per unit produk lebih dekat ke standar BOM.",
     "Manpower": "pengurangan manpower.",
     "Downtime": "pengurangan menit downtime.",
     "Waktu / Proses Kerja": "pengurangan menit proses kerja.",
     "Overtime": "pengurangan menit overtime.",
     "Listrik": "mengurangi pemakaian listrik, penurunan rasio listrik terhadap output, dll.",
     "Air": "mengurangi pemakaian air, penurunan rasio air terhadap output, dll.",
-    "Stock Accuracy": "mengurangi selisih stok/material balance (selisih fisik vs sistem).",
+    "Stock Accuracy": "meningkatkan akurasi data stok di sistem terhadap stok aktual hasil stock opname (mengurangi selisih data vs fisik). BEDA dengan Material Balance yang menyangkut pemakaian material terhadap BOM.",
     "Inventory / Material Value": "penurunan inventory value (umumnya gudang) atau penghematan penggunaan material.",
     "DOI": "mengurangi days of inventory.",
     "Quality": "mengurangi risiko terkait kualitas / quality incident.",
