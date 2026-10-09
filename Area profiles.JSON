@@ -1,0 +1,222 @@
+{
+  "_petunjuk": "File ini bisa diedit tanpa mengubah kode. Tiap area berisi konteks proses yang dipakai AI untuk menilai kewajaran teknis paper. 'alias_departemen' = nama lain departemen yang mungkin ditulis di halaman judul (bobot deteksi paling besar). 'kata_kunci' = istilah khas area di isi dokumen (huruf kecil, hindari kata umum seperti 'sabun' atau 'mesin'). Tambah area baru dengan menyalin salah satu blok. Kunci yang diawali '_' diabaikan.",
+
+  "Umum": {
+    "alias_departemen": [],
+    "kata_kunci": [],
+    "proses": "Area tidak spesifik / lintas departemen. Nilai kewajaran teknis berdasarkan pengetahuan umum manufaktur proses kimia & consumer goods.",
+    "peralatan": [],
+    "parameter_kunci": ["OEE (%)", "downtime (menit/jam)", "reject/rework (% atau kg/ton)", "yield (%)", "konsumsi energi per ton produk"],
+    "losses_khas": ["breakdown", "minor stop", "reject/rework", "giveaway", "pemborosan energi/material"],
+    "akar_masalah_wajar": [],
+    "standar_khas": ["SOP/IK", "OPL", "CILT", "jadwal PM", "centerline"],
+    "catatan_penilaian": [
+      "Perbandingan before/after harus memakai periode dan basis pengukuran yang sebanding."
+    ],
+    "impact_relevan": []
+  },
+
+  "Sabun Batang": {
+    "alias_departemen": ["bar soap", "toilet soap", "laundry bar", "sabun cuci batang", "sabun mandi"],
+    "kata_kunci": ["sabun batang", "bar soap", "toilet soap", "laundry bar", "plodder", "stamping", "stamper", "noodle", "billet", "amalgamator", "roll mill", "vacuum dryer", "wrapping"],
+    "proses": "Base soap/noodle (saponifikasi atau netralisasi) -> pengeringan (vacuum dryer) -> mixing/amalgamator (parfum, pewarna, aditif) -> milling (roll mill) -> plodding/refining (duplex plodder) -> cutting billet -> stamping (die) -> cooling -> wrapping & packing.",
+    "peralatan": ["vacuum spray dryer", "amalgamator/mixer", "three-roll mill", "plodder/refiner", "cutter", "stamper & die", "wrapping machine", "cartoner", "checkweigher"],
+    "parameter_kunci": ["kadar air noodle/billet (%)", "TFM (%)", "suhu billet/plodder (°C)", "berat per batang (g) & giveaway", "reject stamping (%)", "rework/scrap (kg atau kg/ton)", "speed (pcs/menit)", "OEE (%)", "downtime (menit)"],
+    "losses_khas": ["cacat stamping (retak, gompal, berlubang, sticking ke die)", "mottling/warna tidak rata", "giveaway berat", "rework sabun reject", "kemasan wrapping rusak", "minor stop wrapping"],
+    "akar_masalah_wajar": ["kadar air/suhu billet di luar standar", "keausan atau kotoran pada die", "setting cutter/stamper bergeser", "pendinginan die tidak memadai", "kalibrasi checkweigher", "variasi kualitas noodle dari proses sebelumnya"],
+    "standar_khas": ["centerline suhu & kadar air", "jadwal ganti/bersih die", "CILT stamper & wrapping", "OPL setting cutter"],
+    "catatan_penilaian": [
+      "Penurunan reject/rework sebaiknya dinyatakan sebagai % terhadap output atau kg/ton, dengan periode before/after yang produksinya sebanding.",
+      "Replikasi ke line/stamper lain dengan tipe mesin dan format produk sejenis wajar; replikasi ke line dengan format berbeda perlu penjelasan teknis."
+    ],
+    "impact_relevan": ["Material Balance", "Downtime", "Quality", "Waktu / Proses Kerja", "Gas / Steam"]
+  },
+
+  "Sabun Colek": {
+    "alias_departemen": ["colek", "cream detergent", "krim detergen"],
+    "kata_kunci": ["sabun colek", "colek", "cream detergent", "pasta", "krim detergen", "filling cup", "kneader"],
+    "proses": "Penyiapan bahan (asam sulfonat, kaustik/alkali, filler, silikat, aditif) -> pencampuran/netralisasi & kneading -> pengisian ke wadah (filling) -> sealing/penutupan -> packing.",
+    "peralatan": ["mixer/kneader", "tangki bahan", "pompa transfer", "filling machine", "sealing machine", "checkweigher", "conveyor packing"],
+    "parameter_kunci": ["konsistensi/viskositas", "kadar air (%)", "active matter (%)", "pH/alkalinitas", "berat isi (g) & giveaway", "reject seal/bocor (%)", "wadah penyok/rusak (%)", "speed filling", "downtime (menit)"],
+    "losses_khas": ["giveaway berat isi", "seal bocor/tidak rapat", "produk terlalu keras/lembek", "wadah rusak", "minor stop filling"],
+    "akar_masalah_wajar": ["rasio bahan atau urutan dosing tidak sesuai", "suhu/waktu mixing di luar standar", "nozzle filling aus/tersumbat", "setting suhu/tekanan sealing", "kualitas wadah dari supplier"],
+    "standar_khas": ["centerline mixing", "CILT filling & sealing", "OPL setting nozzle", "IK dosing bahan"],
+    "catatan_penilaian": [
+      "Giveaway harus dihitung terhadap berat target dan toleransi; data timbang sampel per shift adalah bukti yang baik.",
+      "Perubahan formula/rasio bahan berdampak ke kualitas; idealnya ada data QC dan FUP."
+    ],
+    "impact_relevan": ["Material Balance", "Quality", "Downtime", "Inventory / Material Value"]
+  },
+
+  "Sabun Powder": {
+    "alias_departemen": ["powder", "detergen bubuk", "detergent powder", "spray drying"],
+    "kata_kunci": ["powder", "bubuk", "detergen bubuk", "spray dryer", "spray drying", "tower", "bulk density", "crutcher", "slurry", "post dosing", "post-dosing", "air lift"],
+    "proses": "Pembuatan slurry (crutcher) -> spray drying di tower (furnace/burner gas, udara panas) -> conveying (air lift) -> sieving -> post-dosing/blending (enzim, parfum, garam) -> filling sachet/pouch -> packing.",
+    "peralatan": ["crutcher", "pompa tekanan tinggi & nozzle", "spray drying tower", "furnace/burner", "cyclone & bag filter", "air lift", "sieve", "blender post-dosing", "filling machine"],
+    "parameter_kunci": ["kadar air slurry & powder (%)", "bulk density (g/L)", "ukuran partikel: fines/oversize (%)", "active matter (%)", "suhu inlet/outlet tower (°C)", "kapasitas tower (ton/jam)", "konsumsi gas per ton (Nm3/ton atau MMBTU/ton)", "reject sachet (%)", "downtime (menit)"],
+    "losses_khas": ["powder off-spec (BD/moisture)", "fines berlebih/oversize", "build-up di dinding tower", "konsumsi gas tinggi", "seal sachet bocor", "giveaway berat"],
+    "akar_masalah_wajar": ["kadar air/viskositas slurry tidak stabil", "nozzle aus atau tersumbat", "suhu inlet/outlet dan balance udara tidak sesuai", "kebocoran udara di sistem tower", "kinerja cyclone/bag filter turun", "setting filling/sealing"],
+    "standar_khas": ["centerline tower (suhu, tekanan, aliran)", "jadwal ganti nozzle", "CILT tower & filling", "IK pembuatan slurry"],
+    "catatan_penilaian": [
+      "Penghematan gas tower WAJIB dinormalisasi per ton produk; konsumsi gas sangat dipengaruhi throughput dan kadar air slurry.",
+      "Perubahan bulk density/moisture yang berkaitan dengan kualitas harus disertai data QC sebelum-sesudah."
+    ],
+    "impact_relevan": ["Gas / Steam", "Listrik", "Quality", "Material Balance", "Downtime", "Safety & Environment"]
+  },
+
+  "Sulfonation": {
+    "alias_departemen": ["sulfonasi", "sulfonator", "las plant"],
+    "kata_kunci": ["sulfonasi", "sulfonation", "sulfonator", "asam sulfonat", "linear alkylbenzene", "so3", "sulfur burner", "falling film", "oleum", "konverter", "hidrolisis", "free oil"],
+    "proses": "Pembakaran sulfur menjadi SO2 -> konversi menjadi SO3 di konverter berkatalis -> pengeringan/pendinginan gas -> reaksi SO3 dengan LAB di falling film reactor -> aging & hidrolisis -> asam sulfonat (LAS) -> (opsional) netralisasi. Gas buang diolah (ESP, scrubber).",
+    "peralatan": ["sulfur burner", "konverter katalis", "air dryer", "heat exchanger/cooler", "falling film reactor", "aging & hydrolysis vessel", "ESP/demister", "scrubber", "pompa dosing LAB"],
+    "parameter_kunci": ["active matter (%)", "free oil/unsulfonated (%)", "H2SO4 bebas (%)", "warna (Klett)", "mol ratio SO3:LAB", "suhu reaksi (°C)", "konsumsi sulfur per ton LAS", "yield (%)", "emisi SO2/SO3/acid mist", "downtime (jam)"],
+    "losses_khas": ["LAS off-spec (warna gelap, free oil tinggi)", "konsumsi sulfur/LAB berlebih", "korosi & kebocoran peralatan", "trip/shutdown unit", "emisi gas melebihi standar"],
+    "akar_masalah_wajar": ["mol ratio tidak stabil karena dosing LAB/gas", "udara proses kurang kering (dew point tinggi)", "pendinginan reaktor tidak cukup", "efisiensi katalis konverter turun", "distribusi film di reaktor tidak merata", "kualitas bahan baku LAB"],
+    "standar_khas": ["centerline mol ratio & suhu", "IK start-up/shut-down", "jadwal cek dew point", "prosedur K3 bahan korosif"],
+    "catatan_penilaian": [
+      "Data analisa lab (active matter, free oil, warna) adalah bukti kuat untuk akar masalah kualitas; klaim reaksi kimia tanpa data lab bersifat asumsi.",
+      "Perbaikan yang mengubah parameter kritis proses atau peralatan bertekanan/korosif idealnya disertai FUP dan kajian risiko K3.",
+      "Jumlah unit sulfonasi biasanya terbatas; 'tidak dapat direplikasi' wajar untuk kriteria 21 bila alasan teknisnya dijelaskan."
+    ],
+    "impact_relevan": ["Material Balance", "Quality", "Safety & Environment", "Downtime", "Listrik"]
+  },
+
+  "Waterglass": {
+    "alias_departemen": ["water glass", "watergalass", "sodium silikat", "silikat"],
+    "kata_kunci": ["waterglass", "water glass", "watergalass", "sodium silikat", "sodium silicate", "natrium silikat", "cullet", "dissolver", "baume", "pasir silika", "soda ash", "furnace", "refraktori"],
+    "proses": "Peleburan pasir silika + soda ash di furnace bersuhu tinggi -> cullet (padatan silikat) -> pelarutan di dissolver/autoclave dengan steam -> filtrasi/pengendapan -> penyesuaian rasio & densitas -> penyimpanan. (Alternatif: proses hidrotermal pasir + kaustik di autoclave.)",
+    "peralatan": ["furnace & burner", "regenerator/recuperator", "conveyor cullet", "dissolver/autoclave", "filter/clarifier", "tangki penyimpanan", "pompa transfer"],
+    "parameter_kunci": ["weight ratio SiO2:Na2O", "Baume/densitas", "kadar padatan (%)", "viskositas", "kejernihan/turbiditas", "konsumsi bahan bakar per ton (Nm3/ton atau MMBTU/ton)", "steam per ton dissolving", "kapasitas furnace (ton/hari)", "umur refraktori"],
+    "losses_khas": ["produk off-spec rasio/Baume", "konsumsi bahan bakar furnace tinggi", "cullet tidak larut sempurna", "kerusakan refraktori", "filtrasi lambat/tersumbat"],
+    "akar_masalah_wajar": ["komposisi/rasio umpan tidak tepat", "kelembaban/kemurnian pasir & soda ash", "pembakaran tidak efisien (rasio udara-bahan bakar)", "tekanan/waktu dissolving kurang", "keausan refraktori"],
+    "standar_khas": ["centerline furnace (suhu, rasio udara-bahan bakar)", "IK dissolving", "jadwal inspeksi refraktori"],
+    "catatan_penilaian": [
+      "Konsumsi bahan bakar furnace harus dinormalisasi per ton produk/cullet; bandingkan periode dengan kapasitas dan kondisi refraktori yang sebanding.",
+      "Furnace biasanya unit tunggal; replikasi ke furnace lain jarang aplikatif kecuali tipe sejenis."
+    ],
+    "impact_relevan": ["Gas / Steam", "Material Balance", "Quality", "Downtime", "Safety & Environment"]
+  },
+
+  "Utility": {
+    "alias_departemen": ["utilitas", "utilities"],
+    "kata_kunci": ["utility", "utilitas", "boiler", "kompresor", "compressor", "udara tekan", "chiller", "cooling tower", "wtp", "reverse osmosis", "ipal", "wwtp", "steam trap", "genset", "trafo", "panel listrik", "power factor"],
+    "proses": "Penyediaan energi & media proses: boiler (steam), kompresor (udara tekan), chiller & cooling tower (air pendingin), WTP/RO (air proses), IPAL/WWTP (limbah cair), distribusi listrik (trafo, panel, genset).",
+    "peralatan": ["boiler & burner", "economizer", "steam trap & jaringan steam", "kompresor & dryer", "chiller", "cooling tower", "pompa", "WTP/RO", "IPAL", "trafo/genset/capacitor bank"],
+    "parameter_kunci": ["efisiensi boiler (%)", "rasio steam/bahan bakar", "kWh per Nm3 udara tekan", "tekanan sistem (bar)", "kebocoran udara/steam (%)", "konsumsi air (m3) & kWh", "kualitas air (TDS, hardness, pH)", "COD/BOD/TSS effluent (mg/L)", "power factor", "trip/downtime (jam)"],
+    "losses_khas": ["kebocoran udara tekan/steam", "steam trap gagal", "pembakaran tidak efisien", "kompresor unload/idle berlebih", "konsumsi air berlebih", "effluent melebihi baku mutu", "trip listrik"],
+    "akar_masalah_wajar": ["kebocoran sambungan/valve", "steam trap rusak tanpa jadwal inspeksi", "rasio udara-bahan bakar tidak optimal", "setting tekanan lebih tinggi dari kebutuhan", "fouling/scaling pada heat exchanger", "dosing bahan kimia water treatment tidak sesuai"],
+    "standar_khas": ["jadwal survei kebocoran & steam trap", "centerline boiler/kompresor", "logsheet harian utilitas", "IK operasi IPAL"],
+    "catatan_penilaian": [
+      "Saving energi WAJIB punya baseline terukur dan dinormalisasi terhadap beban/produksi (mis. kWh per Nm3, kg steam per kg bahan bakar); perhitungan dari nameplate tanpa pengukuran aktual termasuk lemah.",
+      "Perbaikan kebocoran sebaiknya didukung data survei/pengukuran sebelum-sesudah (flow meter, ultrasonic leak detector, logsheet).",
+      "Perbaikan yang menyentuh IPAL/emisi terkait baku mutu regulasi; cek data hasil lab sebelum-sesudah."
+    ],
+    "impact_relevan": ["Listrik", "Gas / Steam", "Air", "Safety & Environment", "Downtime"]
+  },
+
+  "PMA": {
+    "alias_departemen": ["maintenance", "engineering", "teknik", "plant maintenance", "mekanik", "elektrik", "workshop"],
+    "kata_kunci": ["pma", "preventive maintenance", "corrective maintenance", "predictive maintenance", "breakdown maintenance", "mttr", "mtbf", "work order", "sparepart", "spare part", "overhaul", "lubrikasi", "pelumasan", "alignment", "vibrasi", "vibration", "bearing", "gearbox", "kalibrasi", "modifikasi mesin", "fabrikasi", "workshop"],
+    "proses": "Tim maintenance & engineering yang menjaga keandalan aset seluruh plant: preventive/predictive maintenance, perbaikan breakdown, overhaul, modifikasi & fabrikasi mesin, pengelolaan sparepart, kalibrasi, dan proyek engineering. Objek perbaikan bisa berada di area produksi mana pun.",
+    "peralatan": ["mesin produksi semua area (objek perbaikan)", "pompa", "motor & gearbox", "bearing", "conveyor", "pneumatik/hidrolik", "panel & sensor/PLC", "alat ukur vibrasi/thermography", "mesin workshop (bubut, las, frais)"],
+    "parameter_kunci": ["MTBF (jam)", "MTTR (menit/jam)", "frekuensi breakdown (kali/bulan)", "downtime akibat breakdown (menit)", "kepatuhan jadwal PM (%)", "biaya maintenance/sparepart (Rp)", "umur pakai komponen (jam/bulan)", "backlog work order"],
+    "losses_khas": ["breakdown berulang pada komponen yang sama", "MTTR panjang karena menunggu sparepart/diagnosa", "umur komponen pendek", "PM tidak efektif / terlambat", "pemakaian sparepart berlebih"],
+    "akar_masalah_wajar": ["pelumasan tidak sesuai (jenis/jumlah/interval)", "misalignment atau unbalance", "material/spesifikasi komponen tidak sesuai beban", "interval PM tidak berbasis kondisi/data", "instalasi atau torsi pengencangan tidak standar", "kontaminasi (debu, air, bahan kimia) pada komponen", "desain mesin kurang tahan pada kondisi operasi"],
+    "standar_khas": ["jadwal & task list PM", "checklist CILT", "standar pelumasan (lubrication chart)", "IK penggantian komponen", "gambar teknik/as-built hasil modifikasi", "standar stok minimum sparepart"],
+    "catatan_penilaian": [
+      "Departemen penulis adalah PMA walaupun objek perbaikan ada di area produksi; gunakan juga konteks proses area objek bila disebut di dokumen.",
+      "Bukti akar masalah yang kuat untuk kasus mesin: foto/analisa kerusakan komponen (failure analysis), data vibrasi/thermography, histori work order atau breakdown.",
+      "Efektivitas perbaikan sebaiknya dibuktikan dengan data MTBF/frekuensi breakdown sebelum-sesudah pada periode operasi yang sebanding (bukan hanya beberapa hari).",
+      "Modifikasi mesin/peralatan umumnya menyentuh risiko K3 dan perubahan teknis; idealnya disertai FUP dan pembaruan standar PM/CILT.",
+      "Replikasi wajar ke mesin dengan tipe/komponen sejenis di line atau area lain."
+    ],
+    "impact_relevan": ["Downtime", "Inventory / Material Value", "Waktu / Proses Kerja", "Safety & Environment", "Listrik", "Overtime"]
+  },
+
+  "Warehouse": {
+    "alias_departemen": ["gudang", "logistik", "logistic", "warehousing", "distribusi", "store"],
+    "kata_kunci": ["warehouse", "gudang", "stock opname", "fifo", "fefo", "picking", "putaway", "put away", "forklift", "reach truck", "pallet", "racking", "loading dock", "bongkar muat", "wms", "stock accuracy", "selisih stok", "days of inventory", "rmpm", "barang jadi"],
+    "proses": "Penerimaan barang (RM/PM, BBC/BBP, sparepart) -> pemeriksaan & putaway -> penyimpanan (racking/blok) -> picking & penyiapan ke produksi atau pengiriman -> loading/dispatch barang jadi; termasuk stock opname dan pencatatan sistem (WMS/ERP).",
+    "peralatan": ["forklift/reach truck/hand pallet", "racking & pallet", "loading dock", "timbangan", "barcode scanner/WMS", "conveyor gudang"],
+    "parameter_kunci": ["stock accuracy (%)", "selisih stok fisik vs sistem (qty/Rp)", "DOI (hari)", "inventory value (Rp)", "lead time picking/loading (menit)", "utilisasi ruang/rack (%)", "barang rusak/expired (qty/Rp)", "kecepatan bongkar muat (menit/truk)", "insiden forklift"],
+    "losses_khas": ["selisih stok", "barang rusak saat handling", "barang expired/slow moving", "waktu cari & picking lama", "antrian truk bongkar muat", "salah kirim/salah item"],
+    "akar_masalah_wajar": ["layout/penandaan lokasi tidak jelas", "FIFO/FEFO tidak dijalankan", "pencatatan transaksi terlambat atau manual", "metode stacking/handling tidak standar", "kapasitas rack tidak sesuai", "perencanaan kebutuhan tidak sinkron dengan PPIC"],
+    "standar_khas": ["SOP penerimaan & pengeluaran barang", "standar lokasi/labeling rack", "IK stacking & handling", "jadwal stock opname", "SOP operasi forklift"],
+    "catatan_penilaian": [
+      "Tidak ada 'mesin' utama: 'area/mesin' pada rubrik dibaca sebagai area/lokasi gudang atau proses gudang.",
+      "Stock accuracy dan DOI harus dibandingkan dengan metode hitung dan periode yang sama (mis. hasil stock opname bulanan sebelum vs sesudah).",
+      "Penurunan inventory value/DOI termasuk Virtual Saving bila tidak ada penghematan kas nyata; pastikan tidak diklaim sebagai Hard Saving tanpa rincian.",
+      "Replikasi wajar ke gudang/area penyimpanan lain dengan jenis barang atau sistem yang serupa."
+    ],
+    "impact_relevan": ["Stock Accuracy", "Inventory / Material Value", "DOI", "Waktu / Proses Kerja", "Manpower", "Safety & Environment"]
+  },
+
+  "QC": {
+    "alias_departemen": ["quality control", "quality assurance", "qa", "qc/qa", "laboratorium", "lab", "mutu"],
+    "kata_kunci": ["quality control", "quality assurance", "laboratorium", "analisa lab", "sampling", "sampel", "spesifikasi", "coa", "out of spec", "off spec", "ncr", "complain", "keluhan pelanggan", "titrasi", "kalibrasi alat", "release produk", "inspeksi incoming", "capa"],
+    "proses": "Pengendalian mutu dari bahan masuk (incoming inspection RM/PM) -> in-process control di line -> analisa laboratorium -> release produk jadi -> penanganan ketidaksesuaian (NCR/CAPA) dan keluhan pelanggan; termasuk kalibrasi alat ukur.",
+    "peralatan": ["alat analisa lab (titrator, pH meter, moisture analyzer, spektrofotometer, viskometer)", "timbangan analitik", "alat sampling", "sistem pencatatan hasil analisa"],
+    "parameter_kunci": ["jumlah/persentase produk off-spec", "jumlah keluhan pelanggan (kasus/bulan)", "lead time analisa/release (jam)", "akurasi & presisi hasil analisa", "jumlah NCR", "kepatuhan kalibrasi (%)", "biaya rework/reject akibat mutu (Rp)"],
+    "losses_khas": ["produk off-spec lolos ke pasar", "keluhan pelanggan", "release produk terlambat", "hasil analisa tidak konsisten antar analis/shift", "sampling tidak representatif"],
+    "akar_masalah_wajar": ["metode analisa/sampling tidak standar", "alat ukur tidak terkalibrasi", "spesifikasi/batas kendali tidak jelas", "variasi antar analis (skill, interpretasi)", "jeda informasi hasil lab ke produksi"],
+    "standar_khas": ["metode analisa standar", "IK sampling", "spesifikasi produk/bahan", "jadwal kalibrasi", "prosedur NCR/CAPA"],
+    "catatan_penilaian": [
+      "Bukti kuat untuk proyek QC: data hasil analisa sebelum-sesudah, data keluhan/NCR per periode, uji repeatability/reproducibility bila menyangkut metode.",
+      "Perubahan metode analisa atau spesifikasi idealnya divalidasi dan disahkan (no register dokumen) sebelum dipakai.",
+      "Penurunan keluhan pelanggan umumnya termasuk Virtual Saving / Cost Avoidance, bukan Hard Saving.",
+      "'Area/mesin' pada rubrik dibaca sebagai lab, titik inspeksi, atau metode analisa lain yang sejenis."
+    ],
+    "impact_relevan": ["Quality", "Waktu / Proses Kerja", "Material Balance", "SOC & HTA"]
+  },
+
+  "SHE": {
+    "alias_departemen": ["k3", "hse", "ehs", "she", "k3l", "safety", "lingkungan"],
+    "kata_kunci": ["k3", "apd", "hiradc", "hirarc", "jsa", "near miss", "nearmiss", "unsafe act", "unsafe condition", "kecelakaan kerja", "insiden", "lost time", "ltir", "apar", "limbah b3", "emisi", "kebisingan", "debu", "ergonomi", "permit to work", "lototo", "smk3", "iso 14001", "iso 45001"],
+    "proses": "Pengelolaan keselamatan, kesehatan kerja, dan lingkungan di seluruh plant: identifikasi bahaya & penilaian risiko (HIRADC/JSA), pengendalian risiko (hierarki kontrol), inspeksi & patrol, investigasi insiden, pengelolaan limbah B3/non-B3, emisi, dan pemenuhan regulasi.",
+    "peralatan": ["APD", "APAR/hydrant & sistem proteksi kebakaran", "guarding mesin", "rambu & safety line", "alat ukur lingkungan kerja (noise, lux, debu)", "TPS limbah B3"],
+    "parameter_kunci": ["jumlah insiden/near miss (kasus/bulan)", "skor risiko HIRADC sebelum vs sesudah", "temuan unsafe act/condition", "LTIR/frekuensi kecelakaan", "tingkat kebisingan (dB)", "kadar debu/emisi", "volume limbah (kg/ton produk)", "kepatuhan inspeksi (%)"],
+    "losses_khas": ["insiden atau near miss berulang", "risiko tinggi yang belum terkendali", "temuan audit/regulasi", "limbah berlebih", "paparan bising/debu di atas NAB"],
+    "akar_masalah_wajar": ["pengendalian hanya level APD (belum eliminasi/substitusi/engineering)", "guarding/pengaman tidak memadai", "prosedur kerja aman belum ada atau tidak dipatuhi", "kurangnya identifikasi bahaya", "housekeeping buruk", "desain area kerja tidak ergonomis"],
+    "standar_khas": ["HIRADC/JSA yang diperbarui", "SOP kerja aman", "permit to work", "OPL K3", "jadwal inspeksi K3"],
+    "catatan_penilaian": [
+      "Losses measurement boleh berupa ukuran risiko (skor HIRADC, jumlah near miss/temuan, hasil ukur paparan), tidak harus rupiah.",
+      "Nilai apakah pengendalian mengikuti hierarki kontrol; solusi yang hanya menambah APD atau tanda peringatan termasuk pengendalian lemah bila eliminasi/engineering memungkinkan.",
+      "Hasil sebaiknya dibuktikan dengan skor risiko ulang, pengukuran ulang, atau data insiden pada periode yang cukup panjang.",
+      "Replikasi wajar ke area lain dengan bahaya serupa (mesin/aktivitas sejenis)."
+    ],
+    "impact_relevan": ["Safety & Environment", "SOC & HTA", "Downtime", "Air", "Listrik"]
+  },
+
+  "PPIC": {
+    "alias_departemen": ["production planning", "ppc", "planning", "perencanaan produksi"],
+    "kata_kunci": ["ppic", "production planning", "jadwal produksi", "schedule produksi", "mrp", "forecast", "safety stock", "changeover", "pencapaian plan", "schedule adherence", "kebutuhan material", "stock out", "overstock"],
+    "proses": "Perencanaan & pengendalian produksi dan material: forecast & demand -> master production schedule -> perencanaan kebutuhan material (MRP) -> penjadwalan line -> monitoring pencapaian plan dan stok.",
+    "peralatan": ["sistem ERP/MRP", "spreadsheet perencanaan", "dashboard produksi"],
+    "parameter_kunci": ["schedule adherence / pencapaian plan (%)", "frekuensi perubahan jadwal", "stock out RM/PM (kasus)", "DOI (hari)", "jumlah changeover", "waktu tunggu material (menit)", "akurasi forecast (%)"],
+    "losses_khas": ["line berhenti menunggu material", "perubahan jadwal mendadak", "overstock/slow moving", "changeover berlebih", "keterlambatan pemenuhan order"],
+    "akar_masalah_wajar": ["data stok/kebutuhan tidak akurat atau terlambat", "lead time supplier tidak diperhitungkan", "aturan penjadwalan tidak mempertimbangkan urutan changeover", "komunikasi antar departemen tidak terstruktur"],
+    "standar_khas": ["SOP perencanaan produksi", "aturan safety stock", "alur komunikasi perubahan jadwal"],
+    "catatan_penilaian": [
+      "Bukti utama berupa data sistem/laporan periodik (pencapaian plan, stock out, DOI) sebelum-sesudah dengan periode sebanding.",
+      "'Area/mesin' pada rubrik dibaca sebagai proses perencanaan, produk, atau line lain yang sejenis."
+    ],
+    "impact_relevan": ["DOI", "Inventory / Material Value", "Downtime", "Overtime", "Waktu / Proses Kerja"]
+  },
+
+  "Office / Support": {
+    "alias_departemen": ["hr", "hrd", "human resource", "finance", "accounting", "purchasing", "procurement", "it", "general affair", "ga", "admin"],
+    "kata_kunci": ["administrasi", "dokumen", "approval", "purchase order", "invoice", "payroll", "rekrutmen", "digitalisasi", "aplikasi", "otomasi laporan", "lead time proses"],
+    "proses": "Proses administrasi & pendukung (HR, finance, purchasing, IT, GA): alur dokumen, approval, pengadaan, pelaporan, dan layanan internal.",
+    "peralatan": ["sistem ERP", "aplikasi internal", "spreadsheet", "formulir"],
+    "parameter_kunci": ["lead time proses (jam/hari)", "jumlah langkah/approval", "jumlah kesalahan/revisi dokumen", "jam kerja (man-hour)", "overtime (jam)", "biaya pengadaan (Rp)"],
+    "losses_khas": ["proses berbelit/menunggu approval", "input ganda/manual", "kesalahan data", "pekerjaan berulang"],
+    "akar_masalah_wajar": ["alur proses tidak standar", "data tersebar di banyak tempat", "tidak ada template/sistem", "pembagian tanggung jawab tidak jelas"],
+    "standar_khas": ["SOP/flowchart proses", "template/form standar", "panduan aplikasi"],
+    "catatan_penilaian": [
+      "Losses measurement boleh berupa waktu proses, man-hour, atau jumlah kesalahan; tidak harus terkait mesin.",
+      "Penghematan man-hour hanya Hard Saving bila ada pengurangan biaya nyata (mis. overtime/manpower turun) dengan rincian.",
+      "'Area/mesin' pada rubrik dibaca sebagai proses atau departemen lain dengan alur kerja sejenis."
+    ],
+    "impact_relevan": ["Waktu / Proses Kerja", "Overtime", "Manpower"]
+  }
+}
