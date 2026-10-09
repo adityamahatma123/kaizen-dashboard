@@ -26,11 +26,11 @@ st.set_page_config(page_title="Portal Validasi Kaizen", page_icon="🏢", layout
 try:
     from google import genai
     from google.genai import types
-    from groq import Groq
+    from openai import OpenAI
 except ImportError as e:
     st.error(
         f"Library belum terpasang: `{e}`. Pastikan file `requirements.txt` di GitHub berisi "
-        "`google-genai`, `groq`, `pandas`, `xlsxwriter`, lalu Reboot app."
+        "`google-genai`, `openai`, `pandas`, `xlsxwriter`, lalu Reboot app."
     )
     st.stop()
 
@@ -62,7 +62,7 @@ st.markdown(
 st.title("🏢 Portal Validasi Kaizen - Dept. MEX")
 st.markdown(
     "<p style='text-align: center; color: #7F8C8D; font-size: 1.1rem; font-weight: 400; margin-bottom: 2rem;'>Unggah"
-    " dokumen, Gemini vs Groq. Dokumen yang diupload tidak akan disimpan di database, jadi pastikan output data sudah di download secara manual sebelum menutup aplikasi ini.</p>",
+    " dokumen, Gemini vs OpenAI. Dokumen yang diupload tidak akan disimpan di database, jadi pastikan output data sudah di download secara manual sebelum menutup aplikasi ini.</p>",
     unsafe_allow_html=True,
 )
 st.divider()
@@ -84,25 +84,26 @@ def _secret(nama, default=None):
         return os.environ.get(nama, default)
 
 API_KEY_GEMINI = _secret("GEMINI_API_KEY")
-API_KEY_GROQ = _secret("GROQ_API_KEY")
-_hilang = [n for n, v in (("GEMINI_API_KEY", API_KEY_GEMINI), ("GROQ_API_KEY", API_KEY_GROQ)) if not v]
+API_KEY_OPENAI = _secret("OPENAI_API_KEY")
+_hilang = [n for n, v in (("GEMINI_API_KEY", API_KEY_GEMINI), ("OPENAI_API_KEY", API_KEY_OPENAI)) if not v]
 if _hilang:
     st.error(f"API Key belum diisi di Secrets: {', '.join(_hilang)}. Isi di Settings → Secrets, lalu Reboot app.")
     st.stop()
 
-# Model bisa diganti lewat Secrets tanpa edit kode (GEMINI_MODEL, GROQ_MODEL)
+# Model bisa diganti lewat Secrets tanpa edit kode (GEMINI_MODEL, OPENAI_MODEL)
 MODEL_GEMINI = _secret("GEMINI_MODEL", "gemini-3.5-flash-lite")
-MODEL_GROQ = _secret("GROQ_MODEL", "openai/gpt-oss-120b")
+MODEL_OPENAI = _secret("OPENAI_MODEL", "gpt-5-mini")
 THINKING_LEVEL = _secret("THINKING_LEVEL", "medium")
 COOLDOWN_GEMINI = int(_secret("COOLDOWN_GEMINI", "5"))  # detik; naikkan jika sering kena 429
 BATAS_UPLOAD_DETIK = 240
-# --- Pengaturan Groq (free tier gpt-oss-120b: 8K token/menit, 200K token/hari) ---
-GROQ_TPM = int(_secret("GROQ_TPM", "7500"))                 # target token/menit (sedikit di bawah limit 8000)
-GROQ_TPD = int(_secret("GROQ_TPD", "200000"))               # limit token/hari (untuk penghitung di sidebar)
-GROQ_MAX_OUTPUT = int(_secret("GROQ_MAX_OUTPUT", "3000"))   # cadangan token output per panggilan
-GROQ_CHAR_PER_TOKEN = float(_secret("GROQ_CHAR_PER_TOKEN", "3.2"))  # estimasi karakter per token
-GROQ_REASONING = _secret("GROQ_REASONING", "low")           # low/medium/high (khusus gpt-oss)
-GROQ_EXTRA = {"extra_body": {"reasoning_effort": GROQ_REASONING}} if "gpt-oss" in MODEL_GROQ else {}
+# --- Pengaturan OpenAI (berbayar; limit tergantung "usage tier" akun di platform.openai.com) ---
+OPENAI_TPM = int(_secret("OPENAI_TPM", "150000"))               # target token/menit; turunkan jika sering kena 429
+OPENAI_MAX_OUTPUT = int(_secret("OPENAI_MAX_OUTPUT", "16000"))  # termasuk token "berpikir" model reasoning
+OPENAI_MAX_INPUT = int(_secret("OPENAI_MAX_INPUT", "100000"))   # batas aman token input per panggilan
+OPENAI_CHAR_PER_TOKEN = float(_secret("OPENAI_CHAR_PER_TOKEN", "3.2"))  # estimasi karakter per token
+OPENAI_REASONING = _secret("OPENAI_REASONING", "medium")        # minimal/low/medium/high (model reasoning)
+# Model reasoning (gpt-5*, o1/o3/o4*) menolak "temperature" dan memakai "reasoning_effort".
+OPENAI_IS_REASONING = bool(re.match(r"^(gpt-5|o\d)", MODEL_OPENAI.lower()))
 FILE_PROFIL_AREA = _secret("AREA_PROFILE_FILE", "area_profiles.json")
 
 
@@ -112,16 +113,16 @@ def _buat_klien_gemini(api_key):
 
 
 @st.cache_resource(show_spinner=False)
-def _buat_klien_groq(api_key):
-    return Groq(api_key=api_key, timeout=120, max_retries=0)
+def _buat_klien_openai(api_key):
+    return OpenAI(api_key=api_key, timeout=300, max_retries=0)
 
 
 client_gemini = _buat_klien_gemini(API_KEY_GEMINI)
-client_groq = _buat_klien_groq(API_KEY_GROQ)
+client_openai = _buat_klien_openai(API_KEY_OPENAI)
 
 
-class GroqPacer:
-    """Pengatur laju token Groq: menunggu secukupnya agar total token dalam 60 detik terakhir tidak melewati limit."""
+class OpenAIPacer:
+    """Pengatur laju token OpenAI: menunggu secukupnya agar total token dalam 60 detik terakhir tidak melewati limit."""
 
     def __init__(self, tpm):
         self.tpm = tpm
@@ -148,7 +149,7 @@ class GroqPacer:
                     return entri
                 tunggu = 60 - (sekarang - self.riwayat[0][0]) + 0.5
             if not sudah_log:
-                log.write(f"⏱️ Groq: menunggu ±{tunggu:.0f} detik agar tidak melewati limit token/menit...")
+                log.write(f"⏱️ OpenAI: menunggu ±{tunggu:.0f} detik agar tidak melewati limit token/menit...")
                 sudah_log = True
             time.sleep(max(1.0, min(tunggu, 15.0)))
 
@@ -174,10 +175,10 @@ class GroqPacer:
 
 @st.cache_resource(show_spinner=False)
 def _buat_pacer(tpm):
-    return GroqPacer(tpm)
+    return OpenAIPacer(tpm)
 
 
-PACER = _buat_pacer(GROQ_TPM)
+PACER = _buat_pacer(OPENAI_TPM)
 
 
 def buat_config(json_mode=False):
@@ -339,7 +340,7 @@ DEFINISI_SAVING = {
     "Virtual Saving / Cost Avoidance": "saving yang TIDAK real, umumnya terkait material balance, stock akurasi, dan customer complain (biaya yang dihindari).",
 }
 
-# Aturan kalibrasi yang SAMA untuk Gemini & Groq → mengurangi selisih skor antar model.
+# Aturan kalibrasi yang SAMA untuk Gemini & OpenAI → mengurangi selisih skor antar model.
 KALIBRASI_SKOR = """PROSEDUR PENENTUAN SKOR (WAJIB, sama untuk semua kriteria):
 1. Kumpulkan bukti dokumen untuk kriteria itu (isi + angka + halaman).
 2. Bandingkan bukti dengan deskripsi tiap tingkat skor, mulai dari tingkat TERTINGGI.
@@ -384,7 +385,7 @@ PROFIL_AREA, ERR_PROFIL = muat_profil_area()
 
 
 def konteks_area(nama, ringkas=False):
-    """Ubah profil area jadi teks konteks untuk prompt. ringkas=True untuk Groq (hemat token)."""
+    """Ubah profil area jadi teks konteks untuk prompt. ringkas=True memotong daftar panjang (dipakai mode batch)."""
     p = PROFIL_AREA.get(nama) or PROFIL_AREA.get("Umum") or PROFIL_UMUM
     batas = 5 if ringkas else None
 
@@ -462,15 +463,15 @@ def deteksi_area(teks, nama_file=""):
 with st.sidebar.expander("🔧 Diagnostik"):
     st.write(f"streamlit: `{st.__version__}`")
     st.write(f"google-genai: `{_v('google-genai')}`")
-    st.write(f"groq: `{_v('groq')}`")
+    st.write(f"openai: `{_v('openai')}`")
     st.write(f"Model Gemini: `{MODEL_GEMINI}`")
-    st.write(f"Model Groq: `{MODEL_GROQ}`")
+    st.write(f"Model OpenAI: `{MODEL_OPENAI}`")
     st.write(f"Profil area: {', '.join(f'`{a}`' for a in PROFIL_AREA)}")
     if ERR_PROFIL:
         st.warning(ERR_PROFIL)
-    _pakai = PACER.pemakaian_hari_ini()
-    st.write(f"Token Groq terpakai hari ini (perkiraan): `{_pakai:,}` / `{GROQ_TPD:,}`")
-    st.progress(min(_pakai / max(GROQ_TPD, 1), 1.0))
+    st.write(f"Reasoning OpenAI: `{OPENAI_REASONING if OPENAI_IS_REASONING else 'tidak dipakai (temperature 0.2)'}`")
+    st.write(f"Token OpenAI terpakai hari ini (sejak app terakhir restart): `{PACER.pemakaian_hari_ini():,}`")
+    st.caption("Biaya aktual & sisa saldo: platform.openai.com → Usage.")
 
 # ==========================================
 # 4. SESSION STATE
@@ -478,15 +479,15 @@ with st.sidebar.expander("🔧 Diagnostik"):
 _DEFAULTS = {
     "proses_selesai": False,
     "df_verifikasi": pd.DataFrame(),
-    "df_alur_gemini": pd.DataFrame(), "df_alur_groq": pd.DataFrame(),
-    "df_rubrik_gemini": pd.DataFrame(), "df_rubrik_groq": pd.DataFrame(),
+    "df_alur_gemini": pd.DataFrame(), "df_alur_openai": pd.DataFrame(),
+    "df_rubrik_gemini": pd.DataFrame(), "df_rubrik_openai": pd.DataFrame(),
     "df_banding": pd.DataFrame(),
-    "total_skor_gemini": 0.0, "total_skor_groq": 0.0,
-    "df_saving_gemini": pd.DataFrame(), "df_saving_groq": pd.DataFrame(),
-    "df_feedback_gemini": pd.DataFrame(), "df_feedback_groq": pd.DataFrame(),
+    "total_skor_gemini": 0.0, "total_skor_openai": 0.0,
+    "df_saving_gemini": pd.DataFrame(), "df_saving_openai": pd.DataFrame(),
+    "df_feedback_gemini": pd.DataFrame(), "df_feedback_openai": pd.DataFrame(),
     "transkrip": [],
     "log_error": [],
-    "konteks_groq": {},
+    "konteks_openai": {},
     "df_alur_banding": pd.DataFrame(), "df_saving_banding": pd.DataFrame(), "df_feedback_banding": pd.DataFrame(),
     "nama_file": "Dokumen_Kaizen",
     "area": "Umum",
@@ -525,7 +526,7 @@ class BufferLog:
 
 
 def ringkas(teks, batas):
-    """Potong teks panjang (dipakai agar prompt Groq muat di limit token)."""
+    """Potong teks panjang (dipakai agar prompt OpenAI muat di limit token)."""
     teks = teks or ""
     if len(teks) <= batas:
         return teks
@@ -567,85 +568,112 @@ def panggil_gemini(contents, deskripsi, log_ui, config=None, maksimal_percobaan=
 
 
 def estimasi_token(teks, max_output):
-    return int(len(teks) / GROQ_CHAR_PER_TOKEN) + max_output + 120
+    return int(len(teks) / OPENAI_CHAR_PER_TOKEN) + max_output + 120
 
 
-def panggil_groq(prompt_text, deskripsi, log_ui, maksimal_percobaan=3, max_output=None):
-    max_output = max_output or GROQ_MAX_OUTPUT
+SISTEM_OPENAI = (
+    "Anda adalah asisten auditor Kaizen tingkat senior di industri manufaktur sabun & detergen. "
+    "ANDA WAJIB MENGELUARKAN OUTPUT DALAM BENTUK JSON ARRAY SAJA (dimulai dengan [ dan diakhiri "
+    "dengan ]). DILARANG KERAS menambah teks pengantar, penutup, atau tanda markdown. Hanya JSON murni."
+)
+
+
+def _param_openai(max_output):
+    """Parameter sesuai jenis model: reasoning → reasoning_effort (tanpa temperature); lainnya → temperature."""
+    p = {"max_completion_tokens": max_output}
+    if OPENAI_IS_REASONING:
+        p["reasoning_effort"] = OPENAI_REASONING
+    else:
+        p["temperature"] = 0.2
+    return p
+
+
+def panggil_openai(prompt_text, deskripsi, log_ui, maksimal_percobaan=3, max_output=None):
+    max_output = max_output or OPENAI_MAX_OUTPUT
     if PACER.habis():
-        log_ui.write(f"❌ **{deskripsi} (Groq):** dilewati — kuota token HARIAN Groq sudah habis.")
+        log_ui.write(f"❌ **{deskripsi} (OpenAI):** dilewati — kuota/saldo OpenAI habis pada percobaan sebelumnya.")
         return ""
     estimasi = estimasi_token(prompt_text, max_output)
-    if estimasi > GROQ_TPM:
-        log_ui.write(
-            f"⚠️ **{deskripsi} (Groq):** estimasi {estimasi:,} token melebihi GROQ_TPM ({GROQ_TPM:,}); berisiko ditolak (413)."
-        )
+    token_input = estimasi - max_output
+    if token_input > OPENAI_MAX_INPUT:
+        log_ui.write(f"⚠️ **{deskripsi} (OpenAI):** prompt ±{token_input:,} token, dipotong ke batas OPENAI_MAX_INPUT.")
+        prompt_text = ringkas(prompt_text, int(OPENAI_MAX_INPUT * OPENAI_CHAR_PER_TOKEN))
+        estimasi = estimasi_token(prompt_text, max_output)
+    param = _param_openai(max_output)
     for _ in range(maksimal_percobaan):
         entri = PACER.tunggu(estimasi, log_ui)
         try:
-            log_ui.write(f"⏳ **{deskripsi} (Groq):** sedang mengevaluasi (±{estimasi:,} token)...")
-            response = client_groq.chat.completions.create(
-                model=MODEL_GROQ,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Anda adalah asisten auditor Kaizen tingkat senior di industri manufaktur sabun & detergen. "
-                            "ANDA WAJIB MENGELUARKAN OUTPUT DALAM BENTUK JSON ARRAY SAJA (dimulai dengan [ dan diakhiri "
-                            "dengan ]). DILARANG KERAS menambah teks pengantar, penutup, atau tanda markdown. Hanya JSON murni."
-                        ),
-                    },
-                    {"role": "user", "content": prompt_text},
-                ],
-                temperature=0.2,
-                max_completion_tokens=max_output,
-                **GROQ_EXTRA,
-            )
+            log_ui.write(f"⏳ **{deskripsi} (OpenAI):** sedang mengevaluasi (±{estimasi:,} token)...")
+            pesan_chat = [{"role": "system", "content": SISTEM_OPENAI}, {"role": "user", "content": prompt_text}]
+            try:
+                response = client_openai.chat.completions.create(model=MODEL_OPENAI, messages=pesan_chat, **param)
+            except TypeError:
+                # SDK openai versi lama belum mengenal argumen reasoning_effort → kirim lewat extra_body
+                p2 = dict(param)
+                extra = {"reasoning_effort": p2.pop("reasoning_effort")} if "reasoning_effort" in p2 else {}
+                response = client_openai.chat.completions.create(
+                    model=MODEL_OPENAI, messages=pesan_chat, extra_body=extra, **p2
+                )
             pilihan = response.choices[0]
             teks = pilihan.message.content or ""
             pakai = getattr(getattr(response, "usage", None), "total_tokens", None) or estimasi
             PACER.catat(entri, pakai)
             if pilihan.finish_reason == "length":
                 log_ui.write(
-                    f"⚠️ **{deskripsi} (Groq):** output terpotong (finish_reason=length). "
-                    "Naikkan GROQ_MAX_OUTPUT atau turunkan GROQ_REASONING."
+                    f"⚠️ **{deskripsi} (OpenAI):** output terpotong (finish_reason=length). "
+                    "Naikkan OPENAI_MAX_OUTPUT atau turunkan OPENAI_REASONING."
                 )
             if not teks.strip():
                 log_ui.write(
-                    f"⚠️ **{deskripsi} (Groq):** respons kosong (biasanya token habis dipakai reasoning). Mencoba ulang..."
+                    f"⚠️ **{deskripsi} (OpenAI):** respons kosong (biasanya token habis dipakai reasoning). Mencoba ulang..."
                 )
                 time.sleep(3)
                 continue
-            log_ui.write(f"✅ **{deskripsi} (Groq):** selesai ({pakai:,} token terpakai).")
+            log_ui.write(f"✅ **{deskripsi} (OpenAI):** selesai ({pakai:,} token terpakai).")
             return teks
         except Exception as e:
+            PACER.batal(entri)
             pesan = str(e)
             pesan_kecil = pesan.lower()
-            if "413" in pesan or "request too large" in pesan_kecil:
-                PACER.batal(entri)
+            # Parameter tidak didukung model ini → buang parameternya lalu ulangi
+            if "unsupported" in pesan_kecil and ("temperature" in pesan_kecil or "reasoning_effort" in pesan_kecil):
+                buang = "temperature" if "temperature" in pesan_kecil else "reasoning_effort"
+                param.pop(buang, None)
+                log_ui.write(f"ℹ️ **{deskripsi} (OpenAI):** model tidak mendukung `{buang}`, diulang tanpa parameter itu.")
+                continue
+            if "401" in pesan or "invalid_api_key" in pesan_kecil or "incorrect api key" in pesan_kecil:
+                log_ui.write(f"❌ **{deskripsi} (OpenAI):** API key ditolak. Periksa OPENAI_API_KEY di Secrets.")
+                return ""
+            if "model_not_found" in pesan_kecil or ("404" in pesan and "model" in pesan_kecil):
                 log_ui.write(
-                    f"❌ **{deskripsi} (Groq):** request terlalu besar untuk limit token (413). "
-                    "Turunkan GROQ_TPM/GROQ_MAX_OUTPUT atau perkecil GROQ_CHAR_PER_TOKEN agar konteks dipotong lebih banyak."
+                    f"❌ **{deskripsi} (OpenAI):** model `{MODEL_OPENAI}` tidak tersedia untuk akun ini. "
+                    "Ganti OPENAI_MODEL di Secrets."
                 )
                 return ""
-            if "429" in pesan:
-                if "per day" in pesan_kecil:
-                    PACER.tandai_habis()
-                    log_ui.write(f"❌ **{deskripsi} (Groq):** kuota harian Groq habis (TPD/RPD). Coba lagi besok.")
-                    return ""
-                tunggu = _tunggu_dari_pesan(pesan, 15)
-                log_ui.write(f"⚠️ **Groq:** limit per menit tercapai. Menunggu {tunggu:.0f} detik...")
+            if "insufficient_quota" in pesan_kecil or "exceeded your current quota" in pesan_kecil:
+                PACER.tandai_habis()
+                log_ui.write(
+                    f"❌ **{deskripsi} (OpenAI):** saldo/kuota OpenAI habis. Isi billing di platform.openai.com, lalu coba lagi."
+                )
+                return ""
+            if "context_length_exceeded" in pesan_kecil or "maximum context length" in pesan_kecil:
+                log_ui.write(
+                    f"❌ **{deskripsi} (OpenAI):** prompt melebihi kapasitas konteks model. Turunkan OPENAI_MAX_INPUT."
+                )
+                return ""
+            if "429" in pesan or "rate limit" in pesan_kecil:
+                tunggu = _tunggu_dari_pesan(pesan, 20)
+                log_ui.write(f"⚠️ **OpenAI:** limit rate tercapai. Menunggu {tunggu:.0f} detik...")
                 time.sleep(tunggu)
             else:
-                PACER.batal(entri)
-                log_ui.write(f"⚠️ **Groq:** error: {e}. Mencoba ulang...")
+                log_ui.write(f"⚠️ **OpenAI:** error: {e}. Mencoba ulang...")
                 time.sleep(5)
-    log_ui.write(f"❌ **{deskripsi} (Groq):** gagal setelah {maksimal_percobaan} percobaan.")
+    log_ui.write(f"❌ **{deskripsi} (OpenAI):** gagal setelah {maksimal_percobaan} percobaan.")
     return ""
 
 
-def paralel(log, catatan, kerja_gemini, kerja_groq):
-    """Jalankan tugas Gemini & Groq bersamaan. Log dari thread ditampilkan langsung oleh thread utama."""
+def paralel(log, catatan, kerja_gemini, kerja_openai):
+    """Jalankan tugas Gemini & OpenAI bersamaan. Log dari thread ditampilkan langsung oleh thread utama."""
     bg, bq = BufferLog(), BufferLog()
 
     def kuras():
@@ -657,7 +685,7 @@ def paralel(log, catatan, kerja_gemini, kerja_groq):
 
     with ThreadPoolExecutor(max_workers=2) as ex:
         a = ex.submit(kerja_gemini, bg)
-        b = ex.submit(kerja_groq, bq)
+        b = ex.submit(kerja_openai, bq)
         while not (a.done() and b.done()):
             kuras()
             time.sleep(1)
@@ -775,23 +803,23 @@ def format_tabel_rubrik(json_data):
     return df, total
 
 
-def gabungkan_rubrik(df_gem, df_groq):
-    """Gabungkan skor Gemini & Groq jadi SATU tabel berdampingan (kunci gabung: nomor kriteria)."""
+def gabungkan_rubrik(df_gem, df_openai):
+    """Gabungkan skor Gemini & OpenAI jadi SATU tabel berdampingan (kunci gabung: nomor kriteria)."""
     def siapkan(df, sfx):
         sub = pd.DataFrame(columns=KOLOM_RUBRIK) if (df is None or df.empty) else df[KOLOM_RUBRIK].copy()
         sub = sub[["no", "skor", "justifikasi", "perlu_manual", "alasan_manual"]].astype({"no": "int64"})
         return sub.rename(columns={c: f"{c}_{sfx}" for c in sub.columns if c != "no"})
 
     base = pd.DataFrame({"no": list(RUBRIK_META.keys())})
-    m = base.merge(siapkan(df_gem, "gem"), on="no", how="left").merge(siapkan(df_groq, "groq"), on="no", how="left")
+    m = base.merge(siapkan(df_gem, "gem"), on="no", how="left").merge(siapkan(df_openai, "openai"), on="no", how="left")
     m["skor_gem"] = pd.to_numeric(m["skor_gem"], errors="coerce")
-    m["skor_groq"] = pd.to_numeric(m["skor_groq"], errors="coerce")
+    m["skor_openai"] = pd.to_numeric(m["skor_openai"], errors="coerce")
 
     baris = []
     for _, r in m.iterrows():
         no = int(r["no"])
-        ada_dua = pd.notna(r["skor_gem"]) and pd.notna(r["skor_groq"])
-        sama = ada_dua and r["skor_gem"] == r["skor_groq"]
+        ada_dua = pd.notna(r["skor_gem"]) and pd.notna(r["skor_openai"])
+        sama = ada_dua and r["skor_gem"] == r["skor_openai"]
         beda = ada_dua and not sama
         if not ada_dua:
             hasil = "❓ Data tidak lengkap"
@@ -799,22 +827,22 @@ def gabungkan_rubrik(df_gem, df_groq):
             hasil = "✅ Sama" if sama else "⚠️ Beda"
 
         man_gem = bool(r["perlu_manual_gem"]) if pd.notna(r["perlu_manual_gem"]) else False
-        man_groq = bool(r["perlu_manual_groq"]) if pd.notna(r["perlu_manual_groq"]) else False
+        man_openai = bool(r["perlu_manual_openai"]) if pd.notna(r["perlu_manual_openai"]) else False
         alasan = []
         if man_gem and pd.notna(r["alasan_manual_gem"]) and str(r["alasan_manual_gem"]).strip():
             alasan.append(f"Gemini: {r['alasan_manual_gem']}")
-        if man_groq and pd.notna(r["alasan_manual_groq"]) and str(r["alasan_manual_groq"]).strip():
-            alasan.append(f"Groq: {r['alasan_manual_groq']}")
+        if man_openai and pd.notna(r["alasan_manual_openai"]) and str(r["alasan_manual_openai"]).strip():
+            alasan.append(f"OpenAI: {r['alasan_manual_openai']}")
         if beda:
-            alasan.append(f"Skor berbeda (Gemini {r['skor_gem']:g} vs Groq {r['skor_groq']:g})")
-        perlu_manual = man_gem or man_groq or beda
+            alasan.append(f"Skor berbeda (Gemini {r['skor_gem']:g} vs OpenAI {r['skor_openai']:g})")
+        perlu_manual = man_gem or man_openai or beda
 
         baris.append({
             "No": no,
             "Tahap": RUBRIK_META[no][0],
             "Kriteria": RUBRIK_META[no][1],
             "Skor Gemini": r["skor_gem"],
-            "Skor Groq": r["skor_groq"],
+            "Skor OpenAI": r["skor_openai"],
             "Hasil Banding": hasil,
             "Status Validasi": "⚠️ VALIDASI MANUAL" if perlu_manual else "OTOMATIS AI",
             "Alasan Validasi Manual": " | ".join(alasan),
@@ -822,7 +850,7 @@ def gabungkan_rubrik(df_gem, df_groq):
             "Skor Final (Juri)": r["skor_gem"] if sama else None,
             "Catatan Validator": "",
             "Justifikasi Gemini": "" if pd.isna(r["justifikasi_gem"]) else r["justifikasi_gem"],
-            "Justifikasi Groq": "" if pd.isna(r["justifikasi_groq"]) else r["justifikasi_groq"],
+            "Justifikasi OpenAI": "" if pd.isna(r["justifikasi_openai"]) else r["justifikasi_openai"],
         })
     df = pd.DataFrame(baris)
     df["Skor Final (Juri)"] = pd.to_numeric(df["Skor Final (Juri)"], errors="coerce")
@@ -830,7 +858,7 @@ def gabungkan_rubrik(df_gem, df_groq):
 
 
 # ==========================================
-# 5b. PENGGABUNGAN HASIL GEMINI vs GROQ (1 TABEL PER TOPIK)
+# 5b. PENGGABUNGAN HASIL GEMINI vs OPENAI (1 TABEL PER TOPIK)
 # ==========================================
 ALUR_KODE = (
     [f"P{i}" for i in range(1, 8)] + [f"D{i}" for i in range(1, 5)]
@@ -887,18 +915,18 @@ def _hasil_banding(a, b):
     return "✅ Sama" if a == b else "⚠️ Beda"
 
 
-def gabungkan_alur(df_gem, df_groq):
-    peta = {"Gemini": {}, "Groq": {}}
-    for nama, df in (("Gemini", df_gem), ("Groq", df_groq)):
+def gabungkan_alur(df_gem, df_openai):
+    peta = {"Gemini": {}, "OpenAI": {}}
+    for nama, df in (("Gemini", df_gem), ("OpenAI", df_openai)):
         for r in _baris_dict(df):
             k = str(_alias(r, "no", "No", "kode")).strip().upper()
             if k and k not in peta[nama]:
                 peta[nama][k] = r
-    semua = set(peta["Gemini"]) | set(peta["Groq"])
+    semua = set(peta["Gemini"]) | set(peta["OpenAI"])
     kunci = [k for k in ALUR_KODE if k in semua] + sorted(k for k in semua if k not in ALUR_KODE)
     baris = []
     for k in kunci:
-        rg, rq = peta["Gemini"].get(k, {}), peta["Groq"].get(k, {})
+        rg, rq = peta["Gemini"].get(k, {}), peta["OpenAI"].get(k, {})
         vg = str(_alias(rg, "verdict", "status")).strip().upper()
         vq = str(_alias(rq, "verdict", "status")).strip().upper()
         baris.append({
@@ -906,48 +934,48 @@ def gabungkan_alur(df_gem, df_groq):
             "Fase": _alias(rg, "fase", default=_alias(rq, "fase")),
             "Tahap": _alias(rg, "tahap", default=_alias(rq, "tahap")),
             "Verdict Gemini": vg,
-            "Verdict Groq": vq,
+            "Verdict OpenAI": vq,
             "Hasil Banding": _hasil_banding(vg, vq),
             "Temuan Gemini": _alias(rg, "temuan", "keterangan"),
-            "Temuan Groq": _alias(rq, "temuan", "keterangan"),
+            "Temuan OpenAI": _alias(rq, "temuan", "keterangan"),
         })
-    kolom = ["No", "Fase", "Tahap", "Verdict Gemini", "Verdict Groq", "Hasil Banding", "Temuan Gemini", "Temuan Groq"]
+    kolom = ["No", "Fase", "Tahap", "Verdict Gemini", "Verdict OpenAI", "Hasil Banding", "Temuan Gemini", "Temuan OpenAI"]
     return bersihkan_sel(pd.DataFrame(baris, columns=kolom))
 
 
-def gabungkan_saving(df_gem, df_groq):
-    data = {"Gemini": {}, "Groq": {}}
+def gabungkan_saving(df_gem, df_openai):
+    data = {"Gemini": {}, "OpenAI": {}}
     ekstra = {}  # kunci ternormalisasi -> nama tampil (mis. "Jenis Saving")
-    for nama, df in (("Gemini", df_gem), ("Groq", df_groq)):
+    for nama, df in (("Gemini", df_gem), ("OpenAI", df_openai)):
         for r in _baris_dict(df):
             kat = str(_alias(r, "kategori", "Kategori")).strip()
             if not kat:
                 continue
             baku = _ke_kanon(kat, KATEGORI_IMPACT_14 + KATEGORI_SAVING) or ekstra.setdefault(_norm_kunci(kat), kat)
             data[nama].setdefault(baku, r)
-    semua = set(data["Gemini"]) | set(data["Groq"])
+    semua = set(data["Gemini"]) | set(data["OpenAI"])
     kanon = KATEGORI_IMPACT_14 + KATEGORI_SAVING
     kunci = [k for k in kanon if k in semua] + [v for v in ekstra.values() if v in semua]
     baris = []
     for k in kunci:
-        rg, rq = data["Gemini"].get(k, {}), data["Groq"].get(k, {})
+        rg, rq = data["Gemini"].get(k, {}), data["OpenAI"].get(k, {})
         sg = str(_alias(rg, "status")).strip()
         sq = str(_alias(rq, "status")).strip()
         baris.append({
             "Kategori": k,
             "Status Gemini": sg,
-            "Status Groq": sq,
+            "Status OpenAI": sq,
             "Hasil Banding": _hasil_banding(sg, sq),
             "Keterangan Gemini": _alias(rg, "keterangan", "alasan", "catatan"),
-            "Keterangan Groq": _alias(rq, "keterangan", "alasan", "catatan"),
+            "Keterangan OpenAI": _alias(rq, "keterangan", "alasan", "catatan"),
         })
-    kolom = ["Kategori", "Status Gemini", "Status Groq", "Hasil Banding", "Keterangan Gemini", "Keterangan Groq"]
+    kolom = ["Kategori", "Status Gemini", "Status OpenAI", "Hasil Banding", "Keterangan Gemini", "Keterangan OpenAI"]
     return bersihkan_sel(pd.DataFrame(baris, columns=kolom))
 
 
-def gabungkan_feedback(df_gem, df_groq):
-    data = {"Gemini": {}, "Groq": {}}
-    for nama, df in (("Gemini", df_gem), ("Groq", df_groq)):
+def gabungkan_feedback(df_gem, df_openai):
+    data = {"Gemini": {}, "OpenAI": {}}
+    for nama, df in (("Gemini", df_gem), ("OpenAI", df_openai)):
         n_ekstra = 0
         for r in _baris_dict(df):
             kat = str(_alias(r, "kategori", "Kategori")).strip()
@@ -956,23 +984,23 @@ def gabungkan_feedback(df_gem, df_groq):
                 n_ekstra += 1
                 baku = f"Catatan Tambahan {n_ekstra}"
             data[nama].setdefault(baku, r)
-    semua = set(data["Gemini"]) | set(data["Groq"])
+    semua = set(data["Gemini"]) | set(data["OpenAI"])
     kunci = [k for k in FEEDBACK_KATEGORI if k in semua] + sorted(k for k in semua if k not in FEEDBACK_KATEGORI)
     baris = []
     for k in kunci:
-        rg, rq = data["Gemini"].get(k, {}), data["Groq"].get(k, {})
+        rg, rq = data["Gemini"].get(k, {}), data["OpenAI"].get(k, {})
         baris.append({
             "Kategori": k,
             "Kekuatan (Gemini)": _alias(rg, "kekuatan"),
-            "Kekuatan (Groq)": _alias(rq, "kekuatan"),
+            "Kekuatan (OpenAI)": _alias(rq, "kekuatan"),
             "Area Perbaikan (Gemini)": _alias(rg, "area_perbaikan", "area perbaikan"),
-            "Area Perbaikan (Groq)": _alias(rq, "area_perbaikan", "area perbaikan"),
+            "Area Perbaikan (OpenAI)": _alias(rq, "area_perbaikan", "area perbaikan"),
             "Saran Konkret (Gemini)": _alias(rg, "saran_konkret", "saran konkret", "saran"),
-            "Saran Konkret (Groq)": _alias(rq, "saran_konkret", "saran konkret", "saran"),
+            "Saran Konkret (OpenAI)": _alias(rq, "saran_konkret", "saran konkret", "saran"),
         })
     kolom = [
-        "Kategori", "Kekuatan (Gemini)", "Kekuatan (Groq)", "Area Perbaikan (Gemini)", "Area Perbaikan (Groq)",
-        "Saran Konkret (Gemini)", "Saran Konkret (Groq)",
+        "Kategori", "Kekuatan (Gemini)", "Kekuatan (OpenAI)", "Area Perbaikan (Gemini)", "Area Perbaikan (OpenAI)",
+        "Saran Konkret (Gemini)", "Saran Konkret (OpenAI)",
     ]
     return bersihkan_sel(pd.DataFrame(baris, columns=kolom))
 
@@ -1231,13 +1259,15 @@ HASIL SKORING:
 
 
 # ==========================================
-# 6b. KHUSUS GROQ: PROMPT RINGKAS + BATCH (agar patuh limit 8K token/menit)
+# 6b. KHUSUS OPENAI
+# OpenAI memakai prompt LENGKAP yang sama dengan Gemini (perbandingan adil, 1 panggilan per tahap).
+# Mode batch per kelompok kriteria hanya dipakai untuk MELENGKAPI kriteria yang kosong.
 # ==========================================
 def muat_di_budget(kerangka, konteks, bobot, max_output):
     """kerangka memuat placeholder; konteks={placeholder: teks}. Teks dipotong proporsional bobot
-    (sisa jatah bagian yang pendek dibagikan ke bagian lain) agar total prompt muat di budget token."""
+    (sisa jatah bagian yang pendek dibagikan ke bagian lain) agar total prompt muat di OPENAI_MAX_INPUT."""
     tetap = len(kerangka) - sum(len(k) for k in konteks)
-    budget = int((GROQ_TPM - max_output - 150) * GROQ_CHAR_PER_TOKEN) - tetap
+    budget = int((OPENAI_MAX_INPUT - 150) * OPENAI_CHAR_PER_TOKEN) - tetap
     budget = max(budget, 1500)
     sisa, aktif, hasil = budget, dict(konteks), {}
     while aktif:
@@ -1256,17 +1286,17 @@ def muat_di_budget(kerangka, konteks, bobot, max_output):
     return prompt
 
 
-def _groq_json(prompt, deskripsi, log, max_output=None, percobaan=2):
-    """Panggil Groq lalu parse JSON; ulangi sekali jika JSON tidak terbaca."""
+def _openai_json(prompt, deskripsi, log, max_output=None, percobaan=2):
+    """Panggil OpenAI lalu parse JSON; ulangi sekali jika JSON tidak terbaca."""
     for _ in range(percobaan):
-        raw = panggil_groq(prompt, deskripsi, log, max_output=max_output)
+        raw = panggil_openai(prompt, deskripsi, log, max_output=max_output)
         if not raw:
-            return []  # kegagalan API sudah dilaporkan oleh panggil_groq
+            return []  # kegagalan API sudah dilaporkan oleh panggil_openai
         items = bersihkan_dan_parse_json(raw)
         if items:
             return items
-        log.write(f"⚠️ **{deskripsi} (Groq):** JSON tidak terbaca, mencoba ulang...")
-    log.write(f"❌ **{deskripsi} (Groq):** JSON tetap tidak terbaca.")
+        log.write(f"⚠️ **{deskripsi} (OpenAI):** JSON tidak terbaca, mencoba ulang...")
+    log.write(f"❌ **{deskripsi} (OpenAI):** JSON tetap tidak terbaca.")
     return []
 
 
@@ -1293,31 +1323,14 @@ def ambil_bagian(laporan, bagian, nomor):
     return teks or laporan
 
 
-# --- Audit logika: dipecah per fase ---
-GRUP_ALUR = [
-    {"fase": ("PLAN",), "bagian": [1, 2, 3, 4]},
-    {"fase": ("DO", "CHECK", "ACT"), "bagian": [2, 5, 6, 7, 8]},
-]
-
-
-def _filter_alur_fase(prompt, fase_dipilih):
-    awal = prompt.index("## FASE PLAN")
-    akhir = prompt.index("Untuk tiap titik, beri verdict")
-    blok = re.split(r"(?=## FASE )", prompt[awal:akhir])
-    pilih = [b for b in blok if any(b.startswith(f"## FASE {f} ") for f in fase_dipilih)]
-    catatan = "(Pada permintaan ini evaluasi HANYA titik-titik berikut; abaikan fase lain:)\n\n"
-    return prompt[:awal] + catatan + "".join(pilih) + prompt[akhir:]
-
-
-def groq_audit_logika(laporan, bagian, verif, area, log):
-    kerangka_full = prompt_alur("§LAPORAN§", "§VERIF§", area)
-    hasil = []
-    for i, grup in enumerate(GRUP_ALUR, 1):
-        kerangka = _filter_alur_fase(kerangka_full, grup["fase"])
-        teks = ambil_bagian(laporan, bagian, grup["bagian"])
-        p = muat_di_budget(kerangka, {"§LAPORAN§": teks, "§VERIF§": verif}, {"§LAPORAN§": 3, "§VERIF§": 1}, GROQ_MAX_OUTPUT)
-        hasil += _groq_json(p, f"Audit Logika {i}/{len(GRUP_ALUR)}", log)
+def _openai_json_str(prompt, deskripsi, log):
+    hasil = _openai_json(prompt, deskripsi, log)
     return json.dumps(hasil, ensure_ascii=False) if hasil else ""
+
+
+# --- Audit logika: prompt lengkap, 1 panggilan ---
+def openai_audit_logika(laporan, verif, area, log):
+    return _openai_json_str(prompt_alur(laporan, verif, area), "Audit Logika", log)
 
 
 # --- Skoring rubrik: dipecah per kelompok kriteria, memakai prompt ringkas ---
@@ -1352,7 +1365,7 @@ GRUP_SKORING = [
     {"kriteria": [16, 17], "bagian": [2, 7]},
     {"kriteria": [18, 19, 20, 21], "bagian": [8, 5]},
 ]
-GROQ_OUT_SKORING = 2200
+OPENAI_OUT_SKORING = OPENAI_MAX_OUTPUT  # model reasoning butuh ruang untuk token 'berpikir'
 
 
 def rubrik_subset(nomor):
@@ -1421,7 +1434,7 @@ def alur_relevan(alur_items, nomor):
     return json.dumps(pilih, ensure_ascii=False) if pilih else ""
 
 
-def groq_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, area, log, hanya_kriteria=None):
+def openai_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, area, log, hanya_kriteria=None):
     alur_items = bersihkan_dan_parse_json(alur_json)
     bobot = {"§LAPORAN§": 6, "§VERIF§": 2, "§ALUR§": 2, "§KRITIS§": 1, "§KONFIRM§": 1}
 
@@ -1433,8 +1446,8 @@ def groq_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, area, l
             "§KRITIS§": kritis,
             "§KONFIRM§": konfirmatif,
         }
-        p = muat_di_budget(prompt_skoring_ringkas(nomor, area), konteks, bobot, GROQ_OUT_SKORING)
-        items = _groq_json(p, judul, log, max_output=GROQ_OUT_SKORING)
+        p = muat_di_budget(prompt_skoring_ringkas(nomor, area), konteks, bobot, OPENAI_OUT_SKORING)
+        items = _openai_json(p, judul, log, max_output=OPENAI_OUT_SKORING)
         return [it for it in items if _ke_int(it.get("no", it.get("No"))) in nomor]
 
     hasil = []
@@ -1447,57 +1460,39 @@ def groq_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, area, l
         ada = {_ke_int(it.get("no", it.get("No"))) for it in items}
         kurang = [n for n in nomor if n not in ada]
         if kurang and not PACER.habis():
-            log.write(f"🔁 **Skoring (Groq):** kriteria {kurang} belum terisi, mencoba ulang khusus kriteria itu...")
+            log.write(f"🔁 **Skoring (OpenAI):** kriteria {kurang} belum terisi, mencoba ulang khusus kriteria itu...")
             items += jalankan(kurang, grup["bagian"], judul + " — ulang")
         hasil += items
     target = [n for g in GRUP_SKORING for n in g["kriteria"] if hanya_kriteria is None or n in hanya_kriteria]
     ada = {_ke_int(it.get("no", it.get("No"))) for it in hasil}
     hilang = [n for n in target if n not in ada]
     if hilang:
-        log.write(f"⚠️ **Skoring (Groq):** kriteria belum terisi: {hilang}")
+        log.write(f"⚠️ **Skoring (OpenAI):** kriteria belum terisi: {hilang}")
     return json.dumps(hasil, ensure_ascii=False) if hasil else ""
 
 
-# --- Saving & feedback ---
-def groq_saving(laporan, area, log):
-    kerangka = prompt_saving("§LAPORAN§", area)
-    p = muat_di_budget(kerangka, {"§LAPORAN§": laporan}, {"§LAPORAN§": 1}, GROQ_MAX_OUTPUT)
-    hasil = _groq_json(p, "Analisis Saving", log)
-    return json.dumps(hasil, ensure_ascii=False) if hasil else ""
+def openai_skoring_penuh(laporan, bagian, verif, kritis, konfirmatif, alur_json, area, log):
+    """Skoring 21 kriteria dengan prompt lengkap (sama dengan Gemini); kriteria yang terlewat dilengkapi via batch."""
+    items = _openai_json(prompt_skoring(laporan, verif, kritis, konfirmatif, alur_json, area), "Skoring Rubrik", log)
+    items = [it for it in items if _ke_int(it.get("no", it.get("No"))) in RUBRIK_META]
+    ada = {_ke_int(it.get("no", it.get("No"))) for it in items}
+    kurang = [n for n in RUBRIK_META if n not in ada]
+    if kurang and not PACER.habis():
+        log.write(f"🔁 **Skoring (OpenAI):** kriteria {kurang} belum terisi, dilengkapi per kelompok kriteria...")
+        tambahan = bersihkan_dan_parse_json(
+            openai_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, area, log, hanya_kriteria=set(kurang))
+        )
+        items += tambahan
+    return json.dumps(items, ensure_ascii=False) if items else ""
 
 
-def _alur_bermasalah(alur_json):
-    items = bersihkan_dan_parse_json(alur_json)
-    return json.dumps(
-        [
-            {"no": it.get("no"), "tahap": it.get("tahap"), "verdict": it.get("verdict"), "temuan": str(it.get("temuan", ""))[:300]}
-            for it in items
-            if str(it.get("verdict", "")).strip().upper() != "KONSISTEN"
-        ],
-        ensure_ascii=False,
-    )
+# --- Saving & feedback: prompt lengkap, 1 panggilan ---
+def openai_saving(laporan, area, log):
+    return _openai_json_str(prompt_saving(laporan, area), "Analisis Saving", log)
 
 
-def _skor_ringkas(skor_json):
-    items = bersihkan_dan_parse_json(skor_json)
-    return json.dumps(
-        [{"no": it.get("no"), "skor": it.get("skor"), "justifikasi": str(it.get("justifikasi", ""))[:220]} for it in items],
-        ensure_ascii=False,
-    )
-
-
-def groq_feedback(laporan, verif, alur_json, skor_json, area, log):
-    kerangka = prompt_feedback("§LAPORAN§", "§VERIF§", "§ALUR§", "§SKOR§", area)
-    konteks = {
-        "§LAPORAN§": laporan,
-        "§VERIF§": verif,
-        "§ALUR§": _alur_bermasalah(alur_json) or "(tidak tersedia)",
-        "§SKOR§": _skor_ringkas(skor_json) or "(tidak tersedia)",
-    }
-    bobot = {"§LAPORAN§": 3, "§VERIF§": 2, "§ALUR§": 2, "§SKOR§": 2}
-    p = muat_di_budget(kerangka, konteks, bobot, GROQ_MAX_OUTPUT)
-    hasil = _groq_json(p, "Umpan Balik", log)
-    return json.dumps(hasil, ensure_ascii=False) if hasil else ""
+def openai_feedback(laporan, verif, alur_json, skor_json, area, log):
+    return _openai_json_str(prompt_feedback(laporan, verif, alur_json, skor_json, area), "Umpan Balik", log)
 
 
 # ==========================================
@@ -1540,72 +1535,72 @@ def jalankan_pipeline(uploaded_file, log, pilihan_area=OPSI_DETEKSI):
             rincian = ", ".join(f"{k}: {v}" for k, v in sorted(skor_area.items(), key=lambda x: -x[1])[:3])
             log.write(f"🏭 Area terdeteksi: **{area_nama}** ({rincian or 'tidak ada kata kunci area yang cocok'})")
         area = konteks_area(area_nama)
-        area_groq = konteks_area(area_nama, ringkas=True)
+        area_openai = area  # OpenAI memakai konteks area lengkap, sama dengan Gemini
 
         log.write("🖼️ **[2/6] Verifikasi visual & FUP**")
         raw_verif = panggil_gemini([gemini_file, prompt_verifikasi(area)], "Verifikasi Visual & FUP", log, config=CONFIG_JSON)
 
         log.write(
-            "🔗 **[3/6] Audit logika PDCA** (Gemini & Groq paralel). "
-            "Groq diproses bertahap (batch) agar patuh limit token — bagian ini bisa makan beberapa menit."
+            "🔗 **[3/6] Audit logika PDCA** (Gemini & OpenAI paralel). "
+            "Kedua AI menerima prompt yang sama."
         )
         catatan = []
         bagian = pecah_bagian_ekstraksi(laporan)
         if not bagian:
-            log.write("ℹ️ Struktur bagian ekstraksi tidak terbaca; Groq memakai seluruh teks (dipotong sesuai budget).")
+            log.write("ℹ️ Struktur bagian ekstraksi tidak terbaca; bila skor perlu dilengkapi, OpenAI memakai seluruh teks.")
         p_alur = prompt_alur(laporan, raw_verif, area)
-        raw_alur_gem, raw_alur_groq = paralel(
+        raw_alur_gem, raw_alur_openai = paralel(
             log, catatan,
             lambda lg: panggil_gemini(p_alur, "Audit Logika", lg, config=CONFIG_JSON),
-            lambda lg: groq_audit_logika(laporan, bagian, raw_verif, area_groq, lg),
+            lambda lg: openai_audit_logika(laporan, raw_verif, area_openai, lg),
         )
-        log.write(f"✅ Audit logika selesai (Gemini: {'OK' if raw_alur_gem else 'GAGAL'}, Groq: {'OK' if raw_alur_groq else 'GAGAL'})")
+        log.write(f"✅ Audit logika selesai (Gemini: {'OK' if raw_alur_gem else 'GAGAL'}, OpenAI: {'OK' if raw_alur_openai else 'GAGAL'})")
 
         log.write("🧐 **[4/6] Analisis kritis & konfirmatif**")
         kritis = panggil_gemini(prompt_kritis(laporan, raw_alur_gem, area), "Analisis Kritis", log)
         konfirmatif = panggil_gemini(prompt_konfirmatif(laporan, kritis, area), "Analisis Konfirmatif", log)
 
         log.write("📝 **[5/6] Skoring rubrik & analisis saving** (paralel)")
-        alur_groq_pakai = raw_alur_groq
-        if not alur_groq_pakai and raw_alur_gem:
-            alur_groq_pakai = raw_alur_gem
-            log.write("ℹ️ Audit logika Groq kosong; skoring Groq memakai audit logika Gemini sebagai bahan.")
+        alur_openai_pakai = raw_alur_openai
+        if not alur_openai_pakai and raw_alur_gem:
+            alur_openai_pakai = raw_alur_gem
+            log.write("ℹ️ Audit logika OpenAI kosong; skoring OpenAI memakai audit logika Gemini sebagai bahan.")
         p_skor_gem = prompt_skoring(laporan, raw_verif, kritis, konfirmatif, raw_alur_gem, area)
-        raw_skor_gem, raw_skor_groq = paralel(
+        raw_skor_gem, raw_skor_openai = paralel(
             log, catatan,
             lambda lg: panggil_gemini(p_skor_gem, "Skoring Rubrik", lg, config=CONFIG_JSON),
-            lambda lg: groq_skoring(laporan, bagian, raw_verif, kritis, konfirmatif, alur_groq_pakai, area_groq, lg),
+            lambda lg: openai_skoring_penuh(laporan, bagian, raw_verif, kritis, konfirmatif, alur_openai_pakai, area_openai, lg),
         )
-        log.write(f"✅ Skoring selesai (Gemini: {'OK' if raw_skor_gem else 'GAGAL'}, Groq: {'OK' if raw_skor_groq else 'GAGAL'})")
+        log.write(f"✅ Skoring selesai (Gemini: {'OK' if raw_skor_gem else 'GAGAL'}, OpenAI: {'OK' if raw_skor_openai else 'GAGAL'})")
 
         p_sav = prompt_saving(laporan, area)
-        raw_sav_gem, raw_sav_groq = paralel(
+        raw_sav_gem, raw_sav_openai = paralel(
             log, catatan,
             lambda lg: panggil_gemini(p_sav, "Analisis Saving", lg, config=CONFIG_JSON),
-            lambda lg: groq_saving(laporan, area_groq, lg),
+            lambda lg: openai_saving(laporan, area_openai, lg),
         )
         log.write("✅ Analisis saving selesai")
 
         log.write("💬 **[6/6] Umpan balik peserta** (paralel)")
         p_fb_gem = prompt_feedback(laporan, raw_verif, raw_alur_gem, raw_skor_gem, area)
-        raw_fb_gem, raw_fb_groq = paralel(
+        raw_fb_gem, raw_fb_openai = paralel(
             log, catatan,
             lambda lg: panggil_gemini(p_fb_gem, "Umpan Balik", lg, config=CONFIG_JSON),
-            lambda lg: groq_feedback(laporan, raw_verif, alur_groq_pakai, raw_skor_groq, area_groq, lg),
+            lambda lg: openai_feedback(laporan, raw_verif, alur_openai_pakai, raw_skor_openai, area_openai, lg),
         )
 
         return {
             "area": area_nama,
             "laporan": laporan, "verif": raw_verif,
-            "alur_gem": raw_alur_gem, "alur_groq": raw_alur_groq,
+            "alur_gem": raw_alur_gem, "alur_openai": raw_alur_openai,
             "kritis": kritis, "konfirmatif": konfirmatif,
-            "skor_gem": raw_skor_gem, "skor_groq": raw_skor_groq,
-            "sav_gem": raw_sav_gem, "sav_groq": raw_sav_groq,
-            "fb_gem": raw_fb_gem, "fb_groq": raw_fb_groq,
+            "skor_gem": raw_skor_gem, "skor_openai": raw_skor_openai,
+            "sav_gem": raw_sav_gem, "sav_openai": raw_sav_openai,
+            "fb_gem": raw_fb_gem, "fb_openai": raw_fb_openai,
             "catatan": catatan,
-            "konteks_groq": {
+            "konteks_openai": {
                 "laporan": laporan, "verif": raw_verif, "kritis": kritis,
-                "konfirmatif": konfirmatif, "alur": alur_groq_pakai, "area": area_groq,
+                "konfirmatif": konfirmatif, "alur": alur_openai_pakai, "area": area_openai,
             },
         }
     finally:
@@ -1626,35 +1621,35 @@ def simpan_hasil(raw, nama_file):
     ss.nama_file = nama_file
     ss.area = raw.get("area", "Umum")
     ss.log_error = raw.get("catatan", [])
-    ss.konteks_groq = raw.get("konteks_groq", {})
+    ss.konteks_openai = raw.get("konteks_openai", {})
     ss.df_verifikasi = buat_df(bersihkan_dan_parse_json(raw["verif"]))
     ss.df_alur_gemini = buat_df(bersihkan_dan_parse_json(raw["alur_gem"]))
-    ss.df_alur_groq = buat_df(bersihkan_dan_parse_json(raw["alur_groq"]))
+    ss.df_alur_openai = buat_df(bersihkan_dan_parse_json(raw["alur_openai"]))
 
     ss.df_rubrik_gemini, ss.total_skor_gemini = format_tabel_rubrik(bersihkan_dan_parse_json(raw["skor_gem"]))
-    ss.df_rubrik_groq, ss.total_skor_groq = format_tabel_rubrik(bersihkan_dan_parse_json(raw["skor_groq"]))
-    ss.df_banding = gabungkan_rubrik(ss.df_rubrik_gemini, ss.df_rubrik_groq)
+    ss.df_rubrik_openai, ss.total_skor_openai = format_tabel_rubrik(bersihkan_dan_parse_json(raw["skor_openai"]))
+    ss.df_banding = gabungkan_rubrik(ss.df_rubrik_gemini, ss.df_rubrik_openai)
 
     ss.df_saving_gemini = buat_df(bersihkan_dan_parse_json(raw["sav_gem"]))
-    ss.df_saving_groq = buat_df(bersihkan_dan_parse_json(raw["sav_groq"]))
+    ss.df_saving_openai = buat_df(bersihkan_dan_parse_json(raw["sav_openai"]))
     ss.df_feedback_gemini = buat_df(bersihkan_dan_parse_json(raw["fb_gem"]))
-    ss.df_feedback_groq = buat_df(bersihkan_dan_parse_json(raw["fb_groq"]))
+    ss.df_feedback_openai = buat_df(bersihkan_dan_parse_json(raw["fb_openai"]))
 
-    ss.df_alur_banding = gabungkan_alur(ss.df_alur_gemini, ss.df_alur_groq)
-    ss.df_saving_banding = gabungkan_saving(ss.df_saving_gemini, ss.df_saving_groq)
-    ss.df_feedback_banding = gabungkan_feedback(ss.df_feedback_gemini, ss.df_feedback_groq)
+    ss.df_alur_banding = gabungkan_alur(ss.df_alur_gemini, ss.df_alur_openai)
+    ss.df_saving_banding = gabungkan_saving(ss.df_saving_gemini, ss.df_saving_openai)
+    ss.df_feedback_banding = gabungkan_feedback(ss.df_feedback_gemini, ss.df_feedback_openai)
 
     ss.transkrip = [
         {"Peran": "Ekstraksi & Visual (Gemini)", "Laporan": f"Fakta:\n{raw['laporan']}\n\nVisual:\n{raw['verif']}"},
         {"Peran": "Audit Logika (Gemini)", "Laporan": raw["alur_gem"]},
-        {"Peran": "Audit Logika (Groq)", "Laporan": raw["alur_groq"]},
+        {"Peran": "Audit Logika (OpenAI)", "Laporan": raw["alur_openai"]},
         {"Peran": "Tinjauan Kritis & Konfirmatif", "Laporan": f"Kritik:\n{raw['kritis']}\n\nBantahan:\n{raw['konfirmatif']}"},
         {"Peran": "Skoring (Gemini)", "Laporan": raw["skor_gem"]},
-        {"Peran": "Skoring (Groq)", "Laporan": raw["skor_groq"]},
+        {"Peran": "Skoring (OpenAI)", "Laporan": raw["skor_openai"]},
         {"Peran": "Saving (Gemini)", "Laporan": raw["sav_gem"]},
-        {"Peran": "Saving (Groq)", "Laporan": raw["sav_groq"]},
+        {"Peran": "Saving (OpenAI)", "Laporan": raw["sav_openai"]},
         {"Peran": "Feedback (Gemini)", "Laporan": raw["fb_gem"]},
-        {"Peran": "Feedback (Groq)", "Laporan": raw["fb_groq"]},
+        {"Peran": "Feedback (OpenAI)", "Laporan": raw["fb_openai"]},
     ]
 
 
@@ -1664,29 +1659,29 @@ def _nomor_ada(df):
     return set(pd.to_numeric(df["no"], errors="coerce").dropna().astype(int))
 
 
-def lengkapi_skor_groq(kosong):
-    """Jalankan ulang HANYA kriteria Groq yang kosong, lalu gabungkan ke tabel yang sudah ada."""
+def lengkapi_skor_openai(kosong):
+    """Jalankan ulang HANYA kriteria OpenAI yang kosong, lalu gabungkan ke tabel yang sudah ada."""
     ss = st.session_state
-    k = ss.konteks_groq
-    with st.status("🔁 Melengkapi skor Groq yang kosong...", expanded=True) as sb:
+    k = ss.konteks_openai
+    with st.status("🔁 Melengkapi skor OpenAI yang kosong...", expanded=True) as sb:
         try:
             bagian = pecah_bagian_ekstraksi(k["laporan"])
-            raw_baru = groq_skoring(
+            raw_baru = openai_skoring(
                 k["laporan"], bagian, k["verif"], k["kritis"], k["konfirmatif"], k["alur"], k.get("area", ""), sb,
                 hanya_kriteria=set(kosong),
             )
             items_baru = bersihkan_dan_parse_json(raw_baru)
             if not items_baru:
-                sb.update(label="❌ Groq belum berhasil mengisi kriteria yang kosong (lihat pesan di atas)", state="error")
+                sb.update(label="❌ OpenAI belum berhasil mengisi kriteria yang kosong (lihat pesan di atas)", state="error")
                 return False
             df_baru, _ = format_tabel_rubrik(items_baru)
-            df_all = pd.concat([ss.df_rubrik_groq, df_baru], ignore_index=True)
+            df_all = pd.concat([ss.df_rubrik_openai, df_baru], ignore_index=True)
             df_all["no"] = pd.to_numeric(df_all["no"], errors="coerce").astype(int)
             df_all = df_all.drop_duplicates("no", keep="last").sort_values("no").reset_index(drop=True)
-            ss.df_rubrik_groq = df_all
-            ss.total_skor_groq = float(pd.to_numeric(df_all["skor"], errors="coerce").sum())
-            ss.df_banding = gabungkan_rubrik(ss.df_rubrik_gemini, ss.df_rubrik_groq)
-            ss.transkrip.append({"Peran": "Skoring Groq (melengkapi)", "Laporan": raw_baru})
+            ss.df_rubrik_openai = df_all
+            ss.total_skor_openai = float(pd.to_numeric(df_all["skor"], errors="coerce").sum())
+            ss.df_banding = gabungkan_rubrik(ss.df_rubrik_gemini, ss.df_rubrik_openai)
+            ss.transkrip.append({"Peran": "Skoring OpenAI (melengkapi)", "Laporan": raw_baru})
             ss.pop("tbl_rubrik_banding", None)
             sb.update(label="✅ Selesai", state="complete")
             return True
@@ -1697,7 +1692,7 @@ def lengkapi_skor_groq(kosong):
 
 
 def tampilkan_banding(df, pesan_kosong="Belum ada data untuk ditampilkan."):
-    """Tampilkan tabel perbandingan Gemini vs Groq + ringkasan jumlah yang sama/beda."""
+    """Tampilkan tabel perbandingan Gemini vs OpenAI + ringkasan jumlah yang sama/beda."""
     if df is None or df.empty:
         st.info(pesan_kosong)
         return
@@ -1725,10 +1720,10 @@ def tulis_sheet(writer, df, nama):
     dasar = {"bold": True, "font_color": "#FFFFFF", "text_wrap": True, "valign": "vcenter"}
     head = wb.add_format({**dasar, "bg_color": "#7F8C8D"})
     head_gem = wb.add_format({**dasar, "bg_color": "#5C7C99"})   # biru = Gemini
-    head_groq = wb.add_format({**dasar, "bg_color": "#C98B4B"})  # oranye = Groq
+    head_openai = wb.add_format({**dasar, "bg_color": "#C98B4B"})  # oranye = OpenAI
     for i, col in enumerate(df.columns):
         teks = str(col)
-        ws.write(0, i, teks, head_gem if "Gemini" in teks else head_groq if "Groq" in teks else head)
+        ws.write(0, i, teks, head_gem if "Gemini" in teks else head_openai if "OpenAI" in teks else head)
         panjang = max([len(teks)] + [len(str(x)) for x in df[col].head(200)])
         ws.set_column(i, i, min(max(panjang + 2, 8), 60), wrap)
         if teks == "Hasil Banding" and len(df):
@@ -1757,9 +1752,9 @@ def buat_excel(df_banding_final):
                 ["Area/Departemen", ss.area],
                 ["Tanggal laporan", datetime.now().strftime("%Y-%m-%d %H:%M")],
                 ["Model Gemini", MODEL_GEMINI],
-                ["Model Groq", MODEL_GROQ],
+                ["Model OpenAI", MODEL_OPENAI],
                 ["Total skor Gemini", ss.total_skor_gemini],
-                ["Total skor Groq", ss.total_skor_groq],
+                ["Total skor OpenAI", ss.total_skor_openai],
                 ["Total skor final (juri)", float(final_num.sum())],
                 ["Kriteria sudah diputuskan juri", f"{int(final_num.notna().sum())} dari {len(df_banding_final)}"],
                 ["Kriteria skor berbeda", int((df_banding_final["Hasil Banding"] == "⚠️ Beda").sum())],
@@ -1821,34 +1816,34 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
 # ==========================================
 if st.session_state.proses_selesai:
     ss = st.session_state
-    st.success("Analisis Dual-AI selesai! Silakan bandingkan penalaran Gemini dan Groq di bawah.")
+    st.success("Analisis Dual-AI selesai! Silakan bandingkan penalaran Gemini dan OpenAI di bawah.")
     st.info(f"🏭 Area/Departemen yang dipakai sebagai konteks penilaian: **{ss.area}**")
 
     kosong_gem = [n for n in RUBRIK_META if n not in _nomor_ada(ss.df_rubrik_gemini)]
-    kosong_groq = [n for n in RUBRIK_META if n not in _nomor_ada(ss.df_rubrik_groq)]
-    if kosong_gem or kosong_groq:
+    kosong_openai = [n for n in RUBRIK_META if n not in _nomor_ada(ss.df_rubrik_openai)]
+    if kosong_gem or kosong_openai:
         bagian_pesan = []
         if kosong_gem:
             bagian_pesan.append(f"Gemini: kriteria {kosong_gem}")
-        if kosong_groq:
-            bagian_pesan.append(f"Groq: kriteria {kosong_groq}")
+        if kosong_openai:
+            bagian_pesan.append(f"OpenAI: kriteria {kosong_openai}")
         st.warning("Skor rubrik belum lengkap — " + "; ".join(bagian_pesan) + ".")
     if ss.log_error:
-        with st.expander("🩺 Catatan & penyebab error dari Gemini/Groq", expanded=bool(kosong_gem or kosong_groq)):
+        with st.expander("🩺 Catatan & penyebab error dari Gemini/OpenAI", expanded=bool(kosong_gem or kosong_openai)):
             for pesan in ss.log_error:
                 st.markdown(f"- {pesan}")
-    elif kosong_gem or kosong_groq:
+    elif kosong_gem or kosong_openai:
         st.info(
             "Tidak ada error API yang tercatat — artinya model membalas tetapi JSON-nya tidak terbaca. "
             "Cek 'Transkrip Lengkap' untuk melihat isi balasan mentahnya."
         )
-    if kosong_groq and ss.konteks_groq:
+    if kosong_openai and ss.konteks_openai:
         st.caption(
-            "Tombol ini hanya menjalankan ulang kriteria Groq yang kosong (tanpa mengulang seluruh dokumen). "
+            "Tombol ini hanya menjalankan ulang kriteria OpenAI yang kosong (tanpa mengulang seluruh dokumen). "
             "Isian 'Skor Final (Juri)' yang sudah Anda ketik akan ter-reset, jadi pakai sebelum mulai memutuskan."
         )
-        if st.button("🔁 Lengkapi skor Groq yang kosong"):
-            if lengkapi_skor_groq(kosong_groq):
+        if st.button("🔁 Lengkapi skor OpenAI yang kosong"):
+            if lengkapi_skor_openai(kosong_openai):
                 st.rerun()
 
     st.subheader("🔍 1. Fakta Observasi: Verifikasi Kelayakan, 5W1H & FUP")
@@ -1856,15 +1851,15 @@ if st.session_state.proses_selesai:
     st.data_editor(ss.df_verifikasi, num_rows="dynamic", key="tbl_verifikasi", **LEBAR)
 
     st.subheader("🔗 2. Audit Konsistensi Metodologi PDCA (Golden Thread)")
-    st.caption("Verdict Gemini dan Groq untuk tiap titik sambungan PDCA, berdampingan dalam satu tabel.")
+    st.caption("Verdict Gemini dan OpenAI untuk tiap titik sambungan PDCA, berdampingan dalam satu tabel.")
     tampilkan_banding(ss.df_alur_banding)
 
     st.subheader("📝 3. Tabel Validasi Rubrik (Keputusan Akhir)")
     st.caption(
-        "Tab pertama menampilkan skor Gemini dan Groq berdampingan dalam satu tabel. "
+        "Tab pertama menampilkan skor Gemini dan OpenAI berdampingan dalam satu tabel. "
         "'Skor Final (Juri)' otomatis terisi bila kedua AI sepakat; bila berbeda, kolom dibiarkan kosong untuk Anda putuskan."
     )
-    tab_banding, tab_gem, tab_groq = st.tabs(["📊 Perbandingan (1 Tabel)", "🤖 Detail GEMINI", "🚀 Detail GROQ"])
+    tab_banding, tab_gem, tab_openai = st.tabs(["📊 Perbandingan (1 Tabel)", "🤖 Detail GEMINI", "🚀 Detail OPENAI"])
 
     with tab_banding:
         df_b = ss.df_banding
@@ -1879,7 +1874,7 @@ if st.session_state.proses_selesai:
                 "Tahap": st.column_config.TextColumn(width="small"),
                 "Kriteria": st.column_config.TextColumn(width="medium"),
                 "Skor Gemini": st.column_config.NumberColumn(format="%g", width="small"),
-                "Skor Groq": st.column_config.NumberColumn(format="%g", width="small"),
+                "Skor OpenAI": st.column_config.NumberColumn(format="%g", width="small"),
                 "Hasil Banding": st.column_config.TextColumn(width="small"),
                 "Status Validasi": st.column_config.TextColumn(width="medium"),
                 "Alasan Validasi Manual": st.column_config.TextColumn(width="large"),
@@ -1889,14 +1884,14 @@ if st.session_state.proses_selesai:
                 ),
                 "Catatan Validator": st.column_config.TextColumn(width="medium"),
                 "Justifikasi Gemini": st.column_config.TextColumn(width="large"),
-                "Justifikasi Groq": st.column_config.TextColumn(width="large"),
+                "Justifikasi OpenAI": st.column_config.TextColumn(width="large"),
             },
             **LEBAR,
         )
         final_num = pd.to_numeric(edited_banding["Skor Final (Juri)"], errors="coerce")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Skor Gemini", f"{ss.total_skor_gemini:.0f}")
-        m2.metric("Total Skor Groq", f"{ss.total_skor_groq:.0f}")
+        m2.metric("Total Skor OpenAI", f"{ss.total_skor_openai:.0f}")
         m3.metric("Kriteria Skor Berbeda", int((edited_banding["Hasil Banding"] == "⚠️ Beda").sum()))
         m4.metric(
             "Total Skor Final (Juri)",
@@ -1914,12 +1909,12 @@ if st.session_state.proses_selesai:
     with tab_gem:
         st.metric("Total Skor Rubrik (Gemini)", f"{ss.total_skor_gemini:.0f}")
         st.dataframe(ss.df_rubrik_gemini.drop(columns=["perlu_manual"], errors="ignore"), **LEBAR)
-    with tab_groq:
-        st.metric("Total Skor Rubrik (Groq)", f"{ss.total_skor_groq:.0f}")
-        st.dataframe(ss.df_rubrik_groq.drop(columns=["perlu_manual"], errors="ignore"), **LEBAR)
+    with tab_openai:
+        st.metric("Total Skor Rubrik (OpenAI)", f"{ss.total_skor_openai:.0f}")
+        st.dataframe(ss.df_rubrik_openai.drop(columns=["perlu_manual"], errors="ignore"), **LEBAR)
 
     st.subheader("💰 4. Tabel Validasi Impact & Saving (14 Kategori)")
-    st.caption("Status dan keterangan dampak per kategori dari Gemini dan Groq, berdampingan dalam satu tabel.")
+    st.caption("Status dan keterangan dampak per kategori dari Gemini dan OpenAI, berdampingan dalam satu tabel.")
     tampilkan_banding(ss.df_saving_banding)
 
     st.subheader("💬 5. Feedback & Saran untuk Peserta")
