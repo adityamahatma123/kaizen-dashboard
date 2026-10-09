@@ -64,7 +64,7 @@ st.markdown(
     "<p style='text-align: center; color: #7F8C8D; font-size: 1.1rem; font-weight: 400; margin-bottom: 2rem;'>Unggah"
     " dokumen, Gemini vs Groq. Dokumen yang diupload tidak akan disimpan di database, jadi pastikan output data sudah di download secara manual sebelum menutup aplikasi ini.</p>",
     unsafe_allow_html=True,
-)    
+)
 st.divider()
 
 # Kompatibilitas parameter lebar tabel antar versi Streamlit
@@ -103,6 +103,7 @@ GROQ_MAX_OUTPUT = int(_secret("GROQ_MAX_OUTPUT", "3000"))   # cadangan token out
 GROQ_CHAR_PER_TOKEN = float(_secret("GROQ_CHAR_PER_TOKEN", "3.2"))  # estimasi karakter per token
 GROQ_REASONING = _secret("GROQ_REASONING", "low")           # low/medium/high (khusus gpt-oss)
 GROQ_EXTRA = {"extra_body": {"reasoning_effort": GROQ_REASONING}} if "gpt-oss" in MODEL_GROQ else {}
+FILE_PROFIL_AREA = _secret("AREA_PROFILE_FILE", "area_profiles.json")
 
 
 @st.cache_resource(show_spinner=False)
@@ -203,16 +204,6 @@ def _v(paket):
         return "tidak terpasang"
 
 
-with st.sidebar.expander("🔧 Diagnostik"):
-    st.write(f"streamlit: `{st.__version__}`")
-    st.write(f"google-genai: `{_v('google-genai')}`")
-    st.write(f"groq: `{_v('groq')}`")
-    st.write(f"Model Gemini: `{MODEL_GEMINI}`")
-    st.write(f"Model Groq: `{MODEL_GROQ}`")
-    _pakai = PACER.pemakaian_hari_ini()
-    st.write(f"Token Groq terpakai hari ini (perkiraan): `{_pakai:,}` / `{GROQ_TPD:,}`")
-    st.progress(min(_pakai / max(GROQ_TPD, 1), 1.0))
-
 # ==========================================
 # 3. DATA RUBRIK
 # ==========================================
@@ -264,7 +255,7 @@ TAHAP PLAN — 1. Definisikan Masalah & Tentukan Target
 TAHAP PLAN — 2. Klasifikasi Potensi Sumber Masalah
 6. Fishbone Diagram/4M — 0: Tidak memiliki fishbone diagram/4M | 1: Fishbone dibuat namun belum lengkap/analisa dangkal | 2: Fishbone dibuat dengan sistematis dan lengkap
 7. Pemetaan 4M pada fishbone — 0: Pemetaan 4M belum tepat pada fishbone | 1: Sebagian pemetaan 4M sudah tepat | 2: Pemetaan 4M sudah SELURUHNYA tepat
-   WAJIB PERIKSA MENDETAIL: untuk SETIAP cabang/duri pada fishbone, tentukan apakah penyebab itu ditempatkan pada kategori 4M yang BENAR (Man/Method/Machine/Material). Contoh kesalahan umum: penyebab soal alat/mesin dimasukkan ke kategori Man, atau penyebab soal prosedur dimasukkan ke Material. Sebutkan eksplisit kalau menemukan kesalahan kategori.
+   WAJIB PERIKSA MENDETAIL: untuk SETIAP cabang/duri pada fishbone, tentukan apakah penyebab itu ditempatkan pada kategori 4M yang BENAR (Man/Method/Machine/Material). Contoh kesalahan umum: penyebab soal alat/mesin dimasukkan ke kategori Man, atau penyebab soal prosedur dimasukkan ke Material. Sebutkan eksplisit kalau menemukan kesalahan kategori. Dokumen yang memakai kategori tambahan (Measurement, Environment/Mother Nature — 5M1E/6M) TIDAK otomatis salah; nilai ketepatan penempatan tiap penyebab.
 
 TAHAP PLAN — 3. Deteksi Sumber Masalah
 8. Hubungan Akar Penyebab (Why-Why Analysis / 5 Whys) — 0: Hubungan akar penyebab tidak relevan dan tidak terkait | 1: Sebagian hubungan akar penyebab saling terkait dan benar | 2: Semua hubungan akar penyebab saling terkait dan benar
@@ -275,7 +266,7 @@ TAHAP PLAN — 3. Deteksi Sumber Masalah
 TAHAP PLAN — 4. Tetapkan Perbaikan
 11. Action Plan & PIC — 0: Tidak ada action plan dan PIC | 1: Sebagian action plan dan PIC ada | 2: Semua action plan dan PIC ada
 12. Rencana Perbaikan per sumber masalah — 0: Tidak ada rencana perbaikan | 1: Sebagian masalah ada rencana perbaikan | 2: Semua sumber masalah punya rencana perbaikan yang jelas dan/atau prioritas penyelesaian yang baik
-13. Form Usulan Perbaikan (FUP) — 0: Tidak ada pendaftaran FUP | 3: Sudah didaftarkan FUP namun belum dapat approval | 5: Sudah didaftarkan FUP dan sudah dapat approval
+13. Form Usulan Perbaikan (FUP) — 0: Tidak ada pendaftaran FUP | 3: Sudah didaftarkan FUP namun belum dapat approval | 5: Sudah didaftarkan FUP dan sudah dapat approval (dapat dibuktikan)§FUP5§
 
 TAHAP DO — 5. Implementasi Perbaikan
 14. Pelaksanaan Action Plan — 0: Tidak terlaksana semua | 1: Sebagian terlaksana | 2: Terlaksana semua
@@ -291,13 +282,195 @@ TAHAP ACT — 9. Standardisasi
 19. Validasi Standardisasi — 0: Standar terbaru belum tervalidasi/disahkan oleh Sec Head Area | 1: Sebagian standar terbaru sudah terverifikasi & tervalidasi, dibuktikan dengan no register dokumen dan approval Sec Head Area | 2: Semua standar terbaru sudah terverifikasi & tervalidasi, dibuktikan dengan no register dokumen dan approval Sec Head Area
 20. Tindak Lanjut Sosialisasi — 0: Belum sosialisasi | 3: Sebagian dibuktikan dengan dokumen sosialisasi (absensi) | 5: Dibuktikan lengkap dengan dokumen sosialisasi (absensi)
 21. Replikasi ke area/mesin lain — 0: Area/mesin belum direplikasi | 3: Sebagian area/mesin sudah direplikasi ke area yang aplikatif | 5: Semua area/mesin sudah direplikasi ke area yang aplikatif, ATAU improvement memang tidak bisa direplikasi
+   Untuk area pendukung (Warehouse, QC, SHE, PPIC, kantor), "area/mesin" dibaca sebagai area kerja, gudang, lab, line, atau proses lain yang sejenis.
 """
+
+# --- Kebijakan FUP (kriteria 13) ---
+# Rubrik resmi 2026: skor 5 = FUP approved ATAU "action plan tidak memerlukan FUP".
+# Secret FUP_WAJIB = "ya" (default) → kebijakan IMS: FUP wajib untuk SEMUA project (pengecualian rubrik tidak berlaku).
+# Secret FUP_WAJIB = "tidak"        → ikut teks rubrik resmi (pengecualian berlaku, dengan alasan yang jelas di dokumen).
+FUP_WAJIB = str(_secret("FUP_WAJIB", "ya")).strip().lower() in ("ya", "true", "1", "yes")
+if FUP_WAJIB:
+    RUBRIK_21_POIN_DETAIL = RUBRIK_21_POIN_DETAIL.replace(
+        "§FUP5§",
+        "\n   KEBIJAKAN IMS: FUP WAJIB untuk SEMUA project improvement; opsi rubrik 'action plan tidak memerlukan FUP' TIDAK berlaku.",
+    )
+    ATURAN_FUP_SKOR = (
+        "Kriteria 13 (FUP): sesuai kebijakan IMS, FUP WAJIB untuk SEMUA project improvement tanpa pengecualian. "
+        "Skor 5 HANYA jika hasil Verifikasi Visual bagian FUP = 'ADA DAN APPROVED'; 3 jika 'ADA TAPI BELUM APPROVED'; "
+        "0 jika 'TIDAK DITEMUKAN / SALAH DOKUMEN' — meskipun action plan sudah berjalan atau ada OPL/sosialisasi."
+    )
+else:
+    RUBRIK_21_POIN_DETAIL = RUBRIK_21_POIN_DETAIL.replace(
+        "§FUP5§", " ATAU action plan memang tidak memerlukan FUP"
+    )
+    ATURAN_FUP_SKOR = (
+        "Kriteria 13 (FUP): skor 5 jika hasil Verifikasi Visual bagian FUP = 'ADA DAN APPROVED', ATAU dokumen menjelaskan "
+        "dengan alasan yang masuk akal bahwa action plan tidak memerlukan FUP (dalam kasus ini WAJIB perlu_validasi_manual = 'YA' "
+        "agar juri mengonfirmasi dengan ketentuan IMS); 3 jika 'ADA TAPI BELUM APPROVED'; 0 jika tidak ada FUP dan tidak ada "
+        "alasan pengecualian. OPL/IK/daftar hadir BUKAN FUP."
+    )
 
 KATEGORI_IMPACT_14 = [
     "Gas / Steam", "Material Balance", "Manpower", "Downtime", "Waktu / Proses Kerja",
     "Overtime", "Listrik", "Air", "Stock Accuracy", "Inventory / Material Value",
     "DOI", "Quality", "Safety & Environment", "SOC & HTA",
 ]
+# Definisi resmi dari Rubrik 2026 Bagian II (Identifikasi Jenis Kaizen)
+DEFINISI_IMPACT = {
+    "Gas / Steam": "mengurangi pemakaian gas/steam, penurunan rasio gas terhadap output, dll.",
+    "Material Balance": "mengurangi selisih material balance.",
+    "Manpower": "pengurangan manpower.",
+    "Downtime": "pengurangan menit downtime.",
+    "Waktu / Proses Kerja": "pengurangan menit proses kerja.",
+    "Overtime": "pengurangan menit overtime.",
+    "Listrik": "mengurangi pemakaian listrik, penurunan rasio listrik terhadap output, dll.",
+    "Air": "mengurangi pemakaian air, penurunan rasio air terhadap output, dll.",
+    "Stock Accuracy": "mengurangi selisih stok/material balance (selisih fisik vs sistem).",
+    "Inventory / Material Value": "penurunan inventory value (umumnya gudang) atau penghematan penggunaan material.",
+    "DOI": "mengurangi days of inventory.",
+    "Quality": "mengurangi risiko terkait kualitas / quality incident.",
+    "Safety & Environment": "mengurangi/eliminasi risiko terhadap kesehatan, keselamatan, dan lingkungan kerja.",
+    "SOC & HTA": "mengurangi/eliminasi sumber pengotor (Source of Contamination) atau risiko area sulit terjangkau (Hard to Access).",
+}
+KATEGORI_SAVING = ["Hard Saving (>100 Jt)", "Virtual Saving / Cost Avoidance"]
+DEFINISI_SAVING = {
+    "Hard Saving (>100 Jt)": "saving yang REAL di atas Rp 100 juta, umumnya terkait penurunan pemakaian gas, listrik, air, uji riksa, dll., atau pembelian material (RMPM, BBC, BBP, dll.).",
+    "Virtual Saving / Cost Avoidance": "saving yang TIDAK real, umumnya terkait material balance, stock akurasi, dan customer complain (biaya yang dihindari).",
+}
+
+# Aturan kalibrasi yang SAMA untuk Gemini & Groq → mengurangi selisih skor antar model.
+KALIBRASI_SKOR = """PROSEDUR PENENTUAN SKOR (WAJIB, sama untuk semua kriteria):
+1. Kumpulkan bukti dokumen untuk kriteria itu (isi + angka + halaman).
+2. Bandingkan bukti dengan deskripsi tiap tingkat skor, mulai dari tingkat TERTINGGI.
+3. Pilih tingkat tertinggi yang SELURUH syaratnya terpenuhi bukti. Kata "semua/seluruh/lengkap" di rubrik berarti tidak boleh ada satu pun yang kurang.
+4. ATURAN RAGU: jika bukti berada di antara dua tingkat, pilih tingkat yang LEBIH RENDAH dan isi perlu_validasi_manual = "YA" dengan menyebut apa yang perlu dicek juri.
+5. Yang tidak ada di dokumen dianggap tidak ada — jangan memberi kredit untuk hal yang "mungkin sudah dilakukan di lapangan".
+6. Satu kelemahan hanya boleh menurunkan kriteria lain bila peta bukti memang mengaitkannya; jangan menghukum satu kesalahan di semua kriteria.
+7. Konteks area hanya untuk menilai kewajaran teknis; JANGAN turunkan skor karena dokumen memakai parameter/istilah yang berbeda dari profil area selama relevan dan terukur.
+8. Format justifikasi: "Bukti: <isi/angka konkret dari dokumen (hal. X)> → Penilaian: <kenapa memenuhi/tidak memenuhi tingkat skor ini>"."""
+
+# ==========================================
+# 3b. PROFIL AREA (konteks proses per departemen)
+# ==========================================
+# Profil dibaca dari area_profiles.json (bisa diedit tanpa ubah kode).
+OPSI_DETEKSI = "🔍 Deteksi otomatis"
+PROFIL_UMUM = {
+    "kata_kunci": [],
+    "proses": "Area tidak spesifik. Nilai kewajaran teknis berdasarkan pengetahuan umum manufaktur.",
+    "parameter_kunci": ["OEE (%)", "downtime", "reject/rework", "yield", "konsumsi energi per ton produk"],
+    "catatan_penilaian": ["Perbandingan before/after harus memakai periode dan basis pengukuran yang sebanding."],
+}
+
+
+def muat_profil_area():
+    kandidat = [os.path.join(os.path.dirname(os.path.abspath(__file__)), FILE_PROFIL_AREA), FILE_PROFIL_AREA]
+    path = next((p for p in kandidat if os.path.exists(p)), None)
+    if not path:
+        return {"Umum": PROFIL_UMUM}, f"file `{FILE_PROFIL_AREA}` tidak ditemukan — hanya profil Umum yang dipakai"
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        profil = {k: v for k, v in data.items() if isinstance(v, dict) and not str(k).startswith("_")}
+        if not profil:
+            return {"Umum": PROFIL_UMUM}, "file profil area kosong"
+        profil.setdefault("Umum", PROFIL_UMUM)
+        return profil, None
+    except Exception as e:
+        return {"Umum": PROFIL_UMUM}, f"file profil area gagal dibaca: {e}"
+
+
+PROFIL_AREA, ERR_PROFIL = muat_profil_area()
+
+
+def konteks_area(nama, ringkas=False):
+    """Ubah profil area jadi teks konteks untuk prompt. ringkas=True untuk Groq (hemat token)."""
+    p = PROFIL_AREA.get(nama) or PROFIL_AREA.get("Umum") or PROFIL_UMUM
+    batas = 5 if ringkas else None
+
+    def daftar(key, n=None):
+        v = p.get(key) or []
+        if isinstance(v, str):
+            v = [v]
+        return "; ".join(str(x) for x in (v[:n] if n else v))
+
+    baris = [f"AREA: {nama}"]
+    if p.get("proses"):
+        baris.append(f"- Alur proses: {p['proses']}")
+    for key, label, n in (
+        ("peralatan", "Mesin/peralatan umum", batas),
+        ("parameter_kunci", "Parameter/KPI & satuan yang lazim", batas),
+        ("losses_khas", "Losses khas", batas),
+        ("akar_masalah_wajar", "Contoh akar masalah yang wajar secara teknis", batas),
+        ("standar_khas", "Standar/dokumen kontrol yang lazim", batas),
+        ("catatan_penilaian", "Catatan khusus penilaian area ini", None),
+        ("impact_relevan", "Kategori impact yang sering relevan", None),
+    ):
+        t = daftar(key, n)
+        if t:
+            baris.append(f"- {label}: {t}")
+    return "\n".join(baris)
+
+
+def blok_area(teks_area):
+    if not teks_area:
+        return ""
+    return (
+        "KONTEKS AREA/DEPARTEMEN (PENGETAHUAN LATAR untuk menilai kewajaran teknis, BUKAN checklist):\n"
+        f"{teks_area}\n"
+        "Cara memakai konteks ini: (1) untuk memahami istilah, mesin, dan parameter proses yang disebut dokumen; "
+        "(2) untuk menilai apakah rantai sebab-akibat, target, dan angka hasil MASUK AKAL secara teknis untuk proses ini; "
+        "(3) JANGAN menurunkan penilaian hanya karena dokumen tidak menyebut parameter/KPI yang tercantum di sini — parameter lain yang relevan dan terukur sama sahnya; "
+        "(4) JANGAN memasukkan fakta dari konteks ini ke dalam temuan seolah-olah tertulis di dokumen — semua bukti tetap harus berasal dari dokumen.\n\n"
+    )
+
+
+def deteksi_area(teks, nama_file=""):
+    """Deteksi area dari hasil ekstraksi (baris AREA/DEPARTEMEN diberi bobot besar) + kata kunci profil."""
+    sumber = f"{nama_file}\n{teks or ''}".lower()
+    m = re.search(r"area\s*/\s*departemen\s*[:\-][^\n]*", sumber)
+    baris_identitas = re.split(r"\(\s*objek", m.group(0))[0] if m else ""  # buang keterangan objek perbaikan
+    skor = {}
+    for nama, p in PROFIL_AREA.items():
+        if nama == "Umum":
+            continue
+        n = 0
+        def ada(kata, teks):
+            return re.search(r"(?<!\w)" + re.escape(kata) + r"(?!\w)", teks) is not None
+
+        # Baris identitas = departemen PENULIS paper → bobot paling besar
+        # (paper PMA soal mesin produksi tetap terdeteksi sebagai PMA).
+        if ada(nama.lower(), baris_identitas):
+            n += 30
+        for kk in p.get("alias_departemen", []):
+            if ada(str(kk).lower().strip(), baris_identitas):
+                n += 30
+        for kk in p.get("kata_kunci", []):
+            kk = str(kk).lower().strip()
+            if not kk:
+                continue
+            n += len(re.findall(r"(?<!\w)" + re.escape(kk) + r"(?!\w)", sumber))
+            if ada(kk, baris_identitas):
+                n += 10
+        if n:
+            skor[nama] = n
+    if not skor or max(skor.values()) < 2:
+        return "Umum", skor
+    return max(skor, key=skor.get), skor
+
+
+with st.sidebar.expander("🔧 Diagnostik"):
+    st.write(f"streamlit: `{st.__version__}`")
+    st.write(f"google-genai: `{_v('google-genai')}`")
+    st.write(f"groq: `{_v('groq')}`")
+    st.write(f"Model Gemini: `{MODEL_GEMINI}`")
+    st.write(f"Model Groq: `{MODEL_GROQ}`")
+    st.write(f"Profil area: {', '.join(f'`{a}`' for a in PROFIL_AREA)}")
+    if ERR_PROFIL:
+        st.warning(ERR_PROFIL)
+    _pakai = PACER.pemakaian_hari_ini()
+    st.write(f"Token Groq terpakai hari ini (perkiraan): `{_pakai:,}` / `{GROQ_TPD:,}`")
+    st.progress(min(_pakai / max(GROQ_TPD, 1), 1.0))
 
 # ==========================================
 # 4. SESSION STATE
@@ -316,6 +489,7 @@ _DEFAULTS = {
     "konteks_groq": {},
     "df_alur_banding": pd.DataFrame(), "df_saving_banding": pd.DataFrame(), "df_feedback_banding": pd.DataFrame(),
     "nama_file": "Dokumen_Kaizen",
+    "area": "Umum",
 }
 for _k, _val in _DEFAULTS.items():
     if _k not in st.session_state:
@@ -416,9 +590,9 @@ def panggil_groq(prompt_text, deskripsi, log_ui, maksimal_percobaan=3, max_outpu
                     {
                         "role": "system",
                         "content": (
-                            "Anda adalah asisten auditor Kaizen tingkat senior. ANDA WAJIB MENGELUARKAN OUTPUT DALAM "
-                            "BENTUK JSON ARRAY SAJA (dimulai dengan [ dan diakhiri dengan ]). DILARANG KERAS menambah "
-                            "teks pengantar, penutup, atau tanda markdown. Hanya JSON murni."
+                            "Anda adalah asisten auditor Kaizen tingkat senior di industri manufaktur sabun & detergen. "
+                            "ANDA WAJIB MENGELUARKAN OUTPUT DALAM BENTUK JSON ARRAY SAJA (dimulai dengan [ dan diakhiri "
+                            "dengan ]). DILARANG KERAS menambah teks pengantar, penutup, atau tanda markdown. Hanya JSON murni."
                         ),
                     },
                     {"role": "user", "content": prompt_text},
@@ -698,6 +872,10 @@ def _ke_kanon(nama, kanon):
     peta = {_norm_kunci(k): k for k in kanon}
     if n in peta:
         return peta[n]
+    # Nama terpotong/ditambah (mis. "Virtual Saving" vs "Virtual Saving / Cost Avoidance")
+    awalan = [k for k in peta if len(n) >= 6 and (k.startswith(n) or n.startswith(k))]
+    if len(awalan) == 1:
+        return peta[awalan[0]]
     cocok = difflib.get_close_matches(n, list(peta), n=1, cutoff=0.75)
     return peta[cocok[0]] if cocok else None
 
@@ -745,10 +923,11 @@ def gabungkan_saving(df_gem, df_groq):
             kat = str(_alias(r, "kategori", "Kategori")).strip()
             if not kat:
                 continue
-            baku = _ke_kanon(kat, KATEGORI_IMPACT_14) or ekstra.setdefault(_norm_kunci(kat), kat)
+            baku = _ke_kanon(kat, KATEGORI_IMPACT_14 + KATEGORI_SAVING) or ekstra.setdefault(_norm_kunci(kat), kat)
             data[nama].setdefault(baku, r)
     semua = set(data["Gemini"]) | set(data["Groq"])
-    kunci = [k for k in KATEGORI_IMPACT_14 if k in semua] + [v for v in ekstra.values() if v in semua]
+    kanon = KATEGORI_IMPACT_14 + KATEGORI_SAVING
+    kunci = [k for k in kanon if k in semua] + [v for v in ekstra.values() if v in semua]
     baris = []
     for k in kunci:
         rg, rq = data["Gemini"].get(k, {}), data["Groq"].get(k, {})
@@ -801,58 +980,64 @@ def gabungkan_feedback(df_gem, df_groq):
 # ==========================================
 # 6. PROMPT
 # ==========================================
-def prompt_ekstraksi():
+def prompt_ekstraksi(area=""):
     return (
-        "Anda berperan sebagai Analis Ekstraksi Bukti Dokumen Kaizen yang teliti dan hanya melaporkan fakta yang benar-benar tertulis/tervisualisasi di dokumen, tanpa mengarang, karena akan dipakai untuk analisis koherensi logika, bukan sekadar cek ada/tidak.\n\n"
-        "ATURAN PENTING #1 — CARI MAKNA TERSURAT DAN TERSIRAT: banyak dokumen TIDAK menuliskan masalah/target/goal/hasil-saving dengan label eksplisit yang jelas (misal tidak ada section 'Target:' secara langsung), tapi maknanya tersirat di kalimat lain (misal disebutkan sekilas dalam narasi solusi atau kesimpulan). Untuk SETIAP elemen di poin 1, 2, dan 7 di bawah: kalau tidak ada label eksplisit, telusuri SELURUH dokumen untuk kalimat yang secara implisit mengandung makna elemen itu. Kutip kalimat aslinya, sebutkan halaman berapa, DAN tandai dengan jelas apakah itu 'EKSPLISIT' (ada label jelas) atau 'IMPLISIT/TERSIRAT' (disimpulkan dari kalimat lain, sebutkan dari kalimat mana).\n\n"
-        "ATURAN PENTING #2 — JANGAN CUMA SEBUT HALAMAN: setiap kali merujuk suatu halaman/bagian dokumen, WAJIB jelaskan APA ISI KONKRETNYA dan APA ANGKA/MEASUREMENT-nya di situ. DILARANG menulis rujukan kosong seperti 'ada di halaman 24 dan 31' tanpa penjelasan — itu tidak berguna untuk penilaian yang butuh angka pengukuran jelas sebagai faktor penentu.\n\n"
-        "ATURAN PENTING #3 — BEDAKAN TANGGAL HEADER DOKUMEN KONTROL DENGAN TANGGAL AKTUAL KEGIATAN: banyak formulir perusahaan (One Point Lesson, Daftar Hadir, IK/SOP, dsb.) memiliki header 'document control' berisi field seperti 'No. Dokumen', 'Tanggal Berlaku', 'Revisi', dan 'Halaman'. Field-field ini menjelaskan STATUS TEMPLATE/FORMULIR itu sendiri (kapan versi form tersebut disahkan untuk dipakai secara umum di perusahaan), BUKAN tanggal kejadian/aktivitas spesifik yang dicatat memakai formulir itu. JANGAN PERNAH melaporkan 'Tanggal Berlaku' pada header dokumen kontrol sebagai anomali/inkonsistensi timeline proyek — itu bukan indikasi kesalahan dan bukan pembanding yang valid. Tanggal AKTUAL kegiatan biasanya berada di badan formulir (misal field 'Tanggal/Jam Pelaksanaan', tanggal tulisan tangan pada baris data, dsb.), bukan di header dokumen. Untuk SETIAP tanggal yang diekstrak dari sebuah formulir, WAJIB sebutkan secara eksplisit sumbernya: 'tanggal berlaku template (header dokumen kontrol)' atau 'tanggal aktual pelaksanaan (isi formulir)'. HANYA tanggal aktual pelaksanaan yang relevan dibandingkan dengan timeline proyek.\n\n"
-        "ATURAN PENTING #4 — MEMBACA TABEL IMPACT/MANFAAT DENGAN AMBANG BATAS SKALA: kalau dokumen memuat tabel dengan format kategori impact diikuti 2 kolom ambang batas/skala penilaian (misal 'Mengurangi ≤ 1%' vs 'Mengurangi >5%') dan 1 kolom penjelasan/keterangan di ujung kanan, kolom ambang batas itu BUKAN bukti pencapaian aktual — HANYA kolom penjelasan/keterangan yang berisi pencapaian aktual proyek ini. Kalau kolom penjelasan untuk suatu kategori KOSONG, laporkan kategori itu sebagai 'TIDAK ADA PENJELASAN/PENCAPAIAN YANG DILAPORKAN', JANGAN mengarang angka dari kolom ambang batas.\n\n"
-        "Ekstrak SETIAP elemen berikut secara VERBATIM/detail (kutip isi aslinya, jangan diringkas berlebihan):\n\n"
-        "1. MASALAH UTAMA: kondisi awal, DATA KUANTITATIF pendukung (sebutkan angka, satuan, DAN periode/metode pengukurannya persis, misal 'rata-rata 3 bulan Jan-Mar 2024'), 5W1H lengkap (What/Where/When/Who/Why/How), evidence 5G.\n"
-        "2. TARGET AWAL (SMART): kutip persis angka/kalimat target yang ditetapkan di awal dokumen (eksplisit ATAU implisit sesuai Aturan #1).\n"
-        "3. FISHBONE DIAGRAM: untuk SETIAP cabang/duri yang ada, sebutkan (a) kategori 4M yang dipakai dokumen (Man/Method/Machine/Material), (b) isi penyebab yang dituliskan di cabang itu. Buat sebagai daftar, contoh: 'Man: operator kurang terlatih', 'Machine: mesin sering aus'.\n"
-        "4. ANALISIS 5 WHYS: kutip SETIAP baris why secara berurutan dan lengkap (why 1 sampai why terakhir) apa adanya, jangan diringkas. Sebutkan juga apa root cause final yang diklaim dokumen.\n"
-        "5. ACTION PLAN & PIC: daftar rencana perbaikan beserta penanggung jawab (PIC) BESERTA JABATAN/PERANNYA bila disebutkan (misal 'Budi - Teknisi Mesin'), dan status FUP (Form Usulan Perbaikan) bila disebutkan.\n"
-        "6. IMPLEMENTASI: bukti pelaksanaan (dokumentasi, foto before/after, laporan trial).\n"
-        "7. HASIL AKHIR/PENCAPAIAN (termasuk SAVING): kutip persis angka hasil akhir yang dilaporkan, SATUAN, dan periode/metode pengukurannya persis (untuk dibandingkan dengan metode pengukuran kondisi awal di poin 1) — eksplisit ATAU implisit sesuai Aturan #1. Ikuti Aturan #4 kalau data ini berasal dari tabel impact bertingkat ambang batas.\n"
-        "8. STANDARDISASI: dokumen IK/SOP/OPL/CILT/PM/Centerline yang dibuat, status validasi/approval, bukti sosialisasi (absensi — sebutkan SIAPA/JABATAN APA yang mengikuti bila ada), dan bukti replikasi ke area/mesin lain (sebutkan karakteristik area tujuan replikasi bila disebutkan, untuk menilai apakah memang sejenis/sepadan dengan area asal masalah). Untuk setiap tanggal yang ditemukan di dokumen standardisasi/sosialisasi ini, WAJIB ikuti Aturan #3 di atas — bedakan tanggal berlaku template dengan tanggal aktual pelaksanaan sebelum menyimpulkan apa pun.\n"
-        "9. KUALITAS PENULISAN: catat kalau ada typo/salah ketik yang cukup mengganggu, kalimat ambigu/membingungkan, atau bagian yang tidak konsisten penomoran/formatnya (untuk bahan feedback ke peserta, bukan untuk skor rubrik). JANGAN memasukkan tanggal berlaku template dokumen kontrol (Aturan #3) sebagai contoh kesalahan penulisan di sini.\n\n"
+        "Anda berperan sebagai Analis Ekstraksi Bukti Dokumen Kaizen di pabrik sabun & detergen yang teliti dan hanya melaporkan fakta yang benar-benar tertulis/tervisualisasi di dokumen, tanpa mengarang, karena akan dipakai untuk analisis koherensi logika, bukan sekadar cek ada/tidak.\n\n"
+        + blok_area(area)
+        + "ATURAN PENTING #1 — CARI MAKNA TERSURAT DAN TERSIRAT: banyak dokumen TIDAK menuliskan masalah/target/goal/hasil-saving dengan label eksplisit yang jelas (misal tidak ada section 'Target:' secara langsung), tapi maknanya tersirat di kalimat lain (misal disebutkan sekilas dalam narasi solusi atau kesimpulan). Untuk SETIAP elemen di bagian 1, 2, dan 7 di bawah: kalau tidak ada label eksplisit, telusuri SELURUH dokumen untuk kalimat yang secara implisit mengandung makna elemen itu. Kutip kalimat aslinya, sebutkan halaman berapa, DAN tandai dengan jelas apakah itu 'EKSPLISIT' (ada label jelas) atau 'IMPLISIT/TERSIRAT' (disimpulkan dari kalimat lain, sebutkan dari kalimat mana).\n\n"
+        "ATURAN PENTING #2 — JANGAN CUMA SEBUT HALAMAN: setiap kali merujuk suatu halaman/bagian dokumen, WAJIB jelaskan APA ISI KONKRETNYA dan APA ANGKA/MEASUREMENT-nya di situ, dengan format rujukan '(hal. X)'. DILARANG menulis rujukan kosong seperti 'ada di halaman 24 dan 31' tanpa penjelasan.\n\n"
+        "ATURAN PENTING #3 — BEDAKAN TANGGAL HEADER DOKUMEN KONTROL DENGAN TANGGAL AKTUAL KEGIATAN: banyak formulir perusahaan (One Point Lesson, Daftar Hadir, IK/SOP, dsb.) memiliki header 'document control' berisi field seperti 'No. Dokumen', 'Tanggal Berlaku', 'Revisi', dan 'Halaman'. Field-field ini menjelaskan STATUS TEMPLATE/FORMULIR itu sendiri, BUKAN tanggal kejadian/aktivitas spesifik yang dicatat memakai formulir itu. JANGAN PERNAH melaporkan 'Tanggal Berlaku' pada header dokumen kontrol sebagai anomali/inkonsistensi timeline proyek. Tanggal AKTUAL kegiatan biasanya berada di badan formulir (misal field 'Tanggal/Jam Pelaksanaan', tanggal tulisan tangan pada baris data). Untuk SETIAP tanggal yang diekstrak dari sebuah formulir, WAJIB sebutkan sumbernya: 'tanggal berlaku template (header dokumen kontrol)' atau 'tanggal aktual pelaksanaan (isi formulir)'.\n\n"
+        "ATURAN PENTING #4 — MEMBACA TABEL IMPACT/MANFAAT DENGAN AMBANG BATAS SKALA: kalau dokumen memuat tabel dengan format kategori impact diikuti 2 kolom ambang batas/skala penilaian (misal 'Mengurangi ≤ 1%' vs 'Mengurangi >5%') dan 1 kolom penjelasan/keterangan di ujung kanan, kolom ambang batas itu BUKAN bukti pencapaian aktual — HANYA kolom penjelasan/keterangan yang berisi pencapaian aktual proyek ini. Kalau kolom penjelasan untuk suatu kategori KOSONG, laporkan kategori itu sebagai 'TIDAK ADA PENJELASAN/PENCAPAIAN YANG DILAPORKAN'.\n\n"
+        "ATURAN PENTING #5 — TABEL & GRAFIK DATA: untuk setiap grafik/tabel data (trend, pareto, data harian/mingguan), kutip angka per periode yang terbaca (before & after), satuan, dan basisnya (per shift/hari/bulan, per ton produksi, dsb.). Kalau angka pada grafik tidak terbaca jelas, tulis 'angka grafik tidak terbaca jelas' — jangan menebak.\n\n"
+        "ATURAN PENTING #6 — VARIASI FORMAT: dokumen boleh memakai 5W2H, 5M1E/6M (Man, Machine, Method, Material, Measurement, Environment), atau why-why bercabang. Catat APA ADANYA sesuai format dokumen, jangan dipaksakan ke format 4M/5W1H.\n\n"
+        "FORMAT OUTPUT WAJIB: gunakan judul bagian PERSIS seperti di bawah (masing-masing di baris tersendiri, diawali '## '), urut dari 0 sampai 9, agar bisa diproses otomatis.\n\n"
+        "## 0. IDENTITAS — judul proyek; satu baris persis berformat 'AREA/DEPARTEMEN: <nama area/departemen sesuai dokumen>' (misal sabun batang, sabun colek, sabun powder, sulfonation, waterglass, utility, PMA/maintenance-engineering, warehouse, QC, SHE, PPIC, dll. — tulis departemen TIM PENULIS paper, bukan departemen mesin/area yang diperbaiki bila berbeda; jika berbeda, sebutkan keduanya, misal 'AREA/DEPARTEMEN: PMA (objek: mesin stamping Sabun Batang)'); line/mesin/unit yang dibahas; nama tim/PIC utama; periode proyek; tema perbaikan (quality/cost/delivery/safety/energi/lingkungan).\n"
+        "## 1. MASALAH UTAMA — kondisi awal, DATA KUANTITATIF pendukung (sebutkan angka, satuan, DAN periode/metode pengukurannya persis, misal 'rata-rata 3 bulan Jan-Mar 2024'), 5W1H lengkap (What/Where/When/Who/Why/How) apa adanya per elemen, evidence 5G (Gemba, Gembutsu, Genjitsu, Genri, Gensoku).\n"
+        "## 2. TARGET AWAL — kutip persis angka/kalimat target (SMART) yang ditetapkan di awal dokumen (eksplisit ATAU implisit sesuai Aturan #1), termasuk satuan, basis, dan tenggat waktunya bila ada.\n"
+        "## 3. FISHBONE — untuk SETIAP cabang/duri yang ada, sebutkan (a) kategori yang dipakai dokumen (Man/Method/Machine/Material/Measurement/Environment), (b) isi penyebab yang dituliskan di cabang itu, (c) apakah ditandai sebagai penyebab dominan/terpilih. Buat sebagai daftar, contoh: 'Machine: nozzle aus (dipilih)'. Sebutkan juga isi kepala ikan (efek/masalah).\n"
+        "## 4. ANALISIS 5 WHYS — kutip SETIAP baris why secara berurutan dan lengkap (why 1 sampai why terakhir) apa adanya untuk setiap rantai, jangan diringkas. Sebutkan juga apa root cause final yang diklaim dokumen DAN apakah ada data/uji/trial yang membuktikan root cause tersebut (sebutkan isinya) atau hanya pernyataan.\n"
+        "## 5. ACTION PLAN & PIC — daftar rencana perbaikan dipasangkan dengan root cause yang disasar, beserta PIC BESERTA JABATAN/PERANNYA bila disebutkan (misal 'Budi - Teknisi Mesin'), jadwal/tenggat, dan status FUP (Form Usulan Perbaikan) bila disebutkan.\n"
+        "## 6. IMPLEMENTASI — bukti pelaksanaan per action plan (dokumentasi, foto before/after, laporan trial, data trial), sebutkan action plan mana yang punya bukti dan mana yang tidak.\n"
+        "## 7. HASIL AKHIR — kutip persis angka hasil akhir yang dilaporkan (termasuk SAVING), SATUAN, dan periode/metode pengukurannya persis — eksplisit ATAU implisit sesuai Aturan #1. Catat apakah angka sudah dinormalisasi (per ton/per unit produksi/per jam operasi) dan apakah periode before vs after sebanding. Untuk saving rupiah, kutip rincian perhitungannya (harga satuan, volume, dasar annualisasi) bila ada. Ikuti Aturan #4 kalau data berasal dari tabel impact bertingkat ambang batas.\n"
+        "## 8. STANDARDISASI — dokumen IK/SOP/OPL/CILT/PM/Centerline yang dibuat (judul & nomor register bila ada), status validasi/approval (siapa yang tanda tangan), bukti sosialisasi (absensi — sebutkan SIAPA/JABATAN APA yang mengikuti bila ada), dan bukti replikasi ke area/mesin lain (sebutkan karakteristik area tujuan replikasi, untuk menilai apakah memang sejenis dengan area asal masalah). Untuk setiap tanggal, WAJIB ikuti Aturan #3.\n"
+        "## 9. KUALITAS PENULISAN — catat typo/salah ketik yang cukup mengganggu, kalimat ambigu, atau penomoran/format yang tidak konsisten (untuk bahan feedback ke peserta, bukan untuk skor rubrik). JANGAN memasukkan tanggal berlaku template dokumen kontrol (Aturan #3) sebagai contoh kesalahan.\n\n"
         "Jika suatu elemen tidak ditemukan di dokumen sama sekali (baik eksplisit maupun implisit), nyatakan dengan jelas 'TIDAK DITEMUKAN' — jangan mengarang."
     )
 
 
-def prompt_verifikasi():
+def prompt_verifikasi(area=""):
     return (
-        "Anda adalah Analis Verifikasi Bukti Visual & Kelayakan (senior) yang SANGAT KRITIS terhadap kualitas dasar submission Kaizen. Banyak peserta kompetisi ini belum paham konsep PDCA dengan baik, dan beberapa submission bahkan BUKAN merupakan proyek improvement sama sekali (misal: cuma laporan rutin, pengadaan barang tanpa problem-solving, atau aktivitas maintenance biasa yang dibungkus format Kaizen). Tugas Anda membongkar ini dengan membaca LANGSUNG dokumen PDF (termasuk semua foto/gambar/diagram di dalamnya), bukan cuma ringkasan.\n\n"
-        "ATURAN WAJIB:\n"
-        "1. Di kolom 'catatan', JANGAN cuma menyebut nomor halaman — selalu jelaskan ISI KONKRET apa yang ada di situ (dan angka/measurement-nya kalau relevan). Pertimbangkan juga bahwa target/masalah/hasil kadang tertulis IMPLISIT/tersirat di kalimat lain, bukan cuma yang berlabel eksplisit — telusuri keduanya.\n"
-        "2. BEDAKAN tanggal berlaku TEMPLATE formulir (header document control: field 'No. Dokumen', 'Tanggal Berlaku', 'Revisi', 'Halaman') dengan tanggal AKTUAL pelaksanaan kegiatan (biasanya di badan formulir, misal field 'Tanggal/Jam Pelaksanaan' atau tanggal tulisan tangan pada baris data). JANGAN melaporkan tanggal berlaku template sebagai anomali/inkonsistensi dibanding timeline proyek — itu bukan pembanding yang valid. Kalau melaporkan temuan terkait tanggal, sebutkan eksplisit jenis tanggalnya (tanggal berlaku template ATAU tanggal aktual pelaksanaan).\n\n"
+        "Anda adalah Analis Verifikasi Bukti Visual & Kelayakan (senior) yang SANGAT KRITIS terhadap kualitas dasar submission Kaizen di pabrik sabun & detergen. Banyak peserta kompetisi ini belum paham konsep PDCA dengan baik, dan beberapa submission bahkan BUKAN merupakan proyek improvement sama sekali (misal: cuma laporan rutin, pengadaan barang tanpa problem-solving, atau aktivitas maintenance biasa yang dibungkus format Kaizen). Tugas Anda membongkar ini dengan membaca LANGSUNG dokumen PDF (termasuk semua foto/gambar/diagram di dalamnya), bukan cuma ringkasan.\n\n"
+        + blok_area(area)
+        + "ATURAN WAJIB:\n"
+        "1. Di kolom 'catatan', JANGAN cuma menyebut nomor halaman — selalu jelaskan ISI KONKRET apa yang ada di situ (dan angka/measurement-nya kalau relevan). Pertimbangkan juga bahwa target/masalah/hasil kadang tertulis IMPLISIT/tersirat di kalimat lain — telusuri keduanya.\n"
+        "2. BEDAKAN tanggal berlaku TEMPLATE formulir (header document control: 'No. Dokumen', 'Tanggal Berlaku', 'Revisi', 'Halaman') dengan tanggal AKTUAL pelaksanaan kegiatan (biasanya di badan formulir). JANGAN melaporkan tanggal berlaku template sebagai anomali/inkonsistensi. Kalau melaporkan temuan terkait tanggal, sebutkan eksplisit jenis tanggalnya.\n"
+        "3. Perbaikan kecil yang sah (mis. modifikasi alat sederhana, perubahan setting) TETAP proyek improvement selama ada masalah terukur, analisis penyebab, dan perubahan before-after. Jangan menilai TIDAK LAYAK hanya karena skalanya kecil.\n\n"
         "Lakukan 4 pemeriksaan berikut:\n\n"
         "## A. GATE CHECK — Kelayakan sebagai Proyek Improvement\n"
-        "Apakah dokumen ini benar-benar proyek continuous improvement yang valid? Tanda-tanda TIDAK LAYAK: tidak ada kondisi awal/masalah yang didefinisikan dengan jelas, tidak ada perubahan before-after yang nyata, tidak ada analisis akar masalah sama sekali (langsung lompat ke solusi), atau isinya sebenarnya laporan administratif/aktivitas rutin yang dipaksakan ke format Kaizen. Beri verdict: 'LAYAK' (jelas proyek improvement yang sah), 'PERLU PERHATIAN' (ada keraguan, perlu ditinjau juri), atau 'TIDAK LAYAK' (bukan proyek improvement).\n\n"
+        "Apakah dokumen ini benar-benar proyek continuous improvement yang valid? Tanda-tanda TIDAK LAYAK: tidak ada kondisi awal/masalah yang didefinisikan dengan jelas, tidak ada perubahan before-after yang nyata, tidak ada analisis akar masalah sama sekali (langsung lompat ke solusi), atau isinya sebenarnya laporan administratif/aktivitas rutin (mis. penggantian sparepart terjadwal biasa) yang dipaksakan ke format Kaizen. Beri verdict: 'LAYAK', 'PERLU PERHATIAN' (ada keraguan, perlu ditinjau juri), atau 'TIDAK LAYAK'.\n\n"
         "## B. KEBENARAN SEMANTIK 5W1H\n"
-        "Untuk MASING-MASING elemen (What, Where, When, Who, Why, How — atau elemen serupa yang dipakai dokumen), periksa apakah ISI yang dituliskan benar-benar menjawab pertanyaan elemen itu, bukan cuma ada teks di kolomnya. Contoh kesalahan yang harus ditangkap: isi kolom 'How' sebenarnya menjelaskan 'Where' (lokasi), atau isi 'Which'/kolom lain tertukar dengan elemen lain. Tandai tiap elemen SESUAI atau TERTUKAR/TIDAK SESUAI dengan penjelasan spesifik.\n\n"
+        "Untuk MASING-MASING elemen (What, Where, When, Who, Why, How — atau elemen serupa yang dipakai dokumen, termasuk How Much pada 5W2H), periksa apakah ISI yang dituliskan benar-benar menjawab pertanyaan elemen itu, bukan cuma ada teks di kolomnya. Contoh kesalahan: isi kolom 'How' sebenarnya menjelaskan 'Where' (lokasi). Tandai tiap elemen SESUAI atau TERTUKAR/TIDAK SESUAI dengan penjelasan spesifik.\n\n"
         "## C. AUDIT FOTO & BUKTI VISUAL (ANTI-MANIPULASI)\n"
-        "Untuk SETIAP foto/gambar/diagram penting yang kamu lihat di dokumen (terutama foto before/after, dan diagram fishbone/flow), deskripsikan singkat apa yang benar-benar terlihat di foto itu. \n"
-        "KRITIKAL: Cek dengan sangat teliti apakah foto 'Before' dan 'After' sebenarnya adalah foto yang sama persis namun hanya diubah sudut pandangnya (angle), di-zoom, atau di-crop tanpa ada perubahan fisik yang nyata! Tandai SESUAI kalau foto benar-benar menunjukkan perbaikan/perubahan nyata sesuai klaim, atau MERAGUKAN kalau foto before/after terlihat identik (indikasi rekayasa), tidak relevan, atau tampak diambil dari konteks lain.\n\n"
+        "Untuk SETIAP foto/gambar/diagram penting (terutama foto before/after, grafik data, dan diagram fishbone/flow), deskripsikan singkat apa yang benar-benar terlihat. \n"
+        "KRITIKAL: Cek apakah foto 'Before' dan 'After' sebenarnya foto yang sama persis namun hanya diubah sudut pandang, di-zoom, atau di-crop tanpa perubahan fisik nyata. Cek juga apakah foto/peralatan yang terlihat memang sesuai dengan mesin/area yang dibahas dokumen (gunakan konteks area bila ada) — foto peralatan yang jelas berbeda dari area yang diklaim adalah indikasi foto dari konteks lain. Tandai SESUAI atau MERAGUKAN.\n\n"
         "## D. AUDIT KELENGKAPAN FORM USULAN PERBAIKAN (FUP)\n"
         "Cari secara spesifik dokumen/halaman yang diklaim sebagai Form Usulan Perbaikan (FUP). Dokumen FUP yang sah HARUS memenuhi syarat visual berikut:\n"
         "1. Memiliki Kop Surat perusahaan resmi.\n"
         "2. Terdapat judul/keyword 'Form Usulan Perbaikan' atau 'FUP'.\n"
         "3. Terdapat kolom tanda tangan persetujuan (Approval) yang SUDAH DITANDATANGANI.\n"
-        "JANGAN menganggap form standardisasi (OPL/IK/SOP) atau daftar hadir sosialisasi sebagai FUP. Tandai status sebagai 'ADA DAN APPROVED' (jika ada form FUP dan sudah di-acc), 'ADA TAPI BELUM APPROVED' (jika ada form FUP tapi kolom tanda tangan kosong/belum lengkap), atau 'TIDAK DITEMUKAN / SALAH DOKUMEN' (jika yang dilampirkan adalah dokumen lain seperti OPL/SOP atau tidak ada sama sekali).\n\n"
+        "JANGAN menganggap form standardisasi (OPL/IK/SOP) atau daftar hadir sosialisasi sebagai FUP. Tandai status sebagai 'ADA DAN APPROVED', 'ADA TAPI BELUM APPROVED', atau 'TIDAK DITEMUKAN / SALAH DOKUMEN'.\n\n"
         "Keluarkan HANYA JSON array valid (satu array datar berisi semua temuan A+B+C+D, dibedakan lewat field 'kategori'), dengan skema persis:\n"
         '[{"kategori": "GATE CHECK", "item": "Kelayakan Proyek Improvement", "status": "LAYAK", "catatan": "alasan spesifik merujuk isi dokumen"}, {"kategori": "5W1H", "item": "How", "status": "TERTUKAR/TIDAK SESUAI", "catatan": "isi kolom How sebenarnya menjelaskan lokasi (Where), bukan metode"}, {"kategori": "FOTO", "item": "Foto halaman 8 (before)", "status": "MERAGUKAN", "catatan": "foto before dan after terlihat seperti foto yang sama hanya di-zoom"}, {"kategori": "FUP", "item": "Form Usulan Perbaikan", "status": "TIDAK DITEMUKAN / SALAH DOKUMEN", "catatan": "yang dilampirkan adalah form OPL, bukan FUP resmi"}]'
     )
 
 
-def prompt_alur(laporan_ekstraksi, raw_verifikasi):
-    return f"""Anda adalah Analis Audit Konsistensi Metodologi PDCA (QC-Story) yang menelusuri "benang merah" (golden thread): apakah tiap tools di tiap fase PDCA benar-benar tersambung MASUK AKAL secara teknis/operasional ke tools sebelum dan sesudahnya — bukan cuma sama-sama ada di dokumen.
+def prompt_alur(laporan_ekstraksi, raw_verifikasi, area=""):
+    return f"""Anda adalah Analis Audit Konsistensi Metodologi PDCA (QC-Story) di pabrik sabun & detergen yang menelusuri "benang merah" (golden thread): apakah tiap tools di tiap fase PDCA benar-benar tersambung MASUK AKAL secara teknis/operasional ke tools sebelum dan sesudahnya — bukan cuma sama-sama ada di dokumen.
 
-Gunakan pengetahuan umum troubleshooting industri sebagai patokan kewajaran sebab-akibat. Contoh MASUK AKAL: "mesin macet" -> kenapa? "bearing aus" -> kenapa? "kurang pelumasan" -> kenapa? "tidak ada jadwal preventive maintenance". Contoh TIDAK MASUK AKAL: "mesin macet" tiba-tiba dijawab "operator kurang training" tanpa penjelasan penghubung.
+Gunakan pengetahuan troubleshooting industri (dan konteks area di bawah, bila ada) sebagai patokan kewajaran sebab-akibat. Contoh MASUK AKAL: "mesin macet" -> kenapa? "bearing aus" -> kenapa? "kurang pelumasan" -> kenapa? "tidak ada jadwal preventive maintenance". Contoh TIDAK MASUK AKAL: "mesin macet" tiba-tiba dijawab "operator kurang training" tanpa penjelasan penghubung.
 
-ATURAN WAJIB UNTUK SETIAP TEMUAN: jangan cuma menyebut nomor halaman — jelaskan ISI KONKRET dan ANGKA/MEASUREMENT yang ada di situ. Pertimbangkan juga bahwa sebagian data (target/masalah/hasil) mungkin tertulis IMPLISIT (lihat penanda EKSPLISIT/IMPLISIT dari hasil ekstraksi di bawah), bukan cuma yang berlabel jelas.
+{blok_area(area)}ATURAN WAJIB UNTUK SETIAP TEMUAN: jangan cuma menyebut nomor halaman — jelaskan ISI KONKRET dan ANGKA/MEASUREMENT yang ada di situ. Pertimbangkan juga bahwa sebagian data (target/masalah/hasil) mungkin tertulis IMPLISIT (lihat penanda EKSPLISIT/IMPLISIT dari hasil ekstraksi di bawah). Bedakan "tidak ditemukan di dokumen" dengan "ada tapi lemah".
 
 DATA HASIL EKSTRAKSI DOKUMEN:
 {laporan_ekstraksi}
@@ -865,27 +1050,27 @@ Telusuri dan evaluasi SEMUA titik sambungan berikut, dikelompokkan per fase PDCA
 ## FASE PLAN (P1-P7)
 P1. "5G ke 5W1H": apakah bukti observasi lapangan (5G) konsisten dan mendukung detail yang dilaporkan di 5W1H, bukan cuma tempelan formalitas?
 P2. "5W1H ke Problem Statement": apakah rangkuman masalah mencerminkan semua elemen 5W1H DENGAN BENAR (cek hasil verifikasi — kalau ada elemen TERTUKAR, ini otomatis TIDAK KONSISTEN), tidak ada yang hilang/melenceng?
-P3. "Data/Losses ke Target SMART": apakah target yang ditetapkan punya justifikasi ANGKA yang jelas dari data losses/kondisi awal (misal target reduksi 30% harus bisa ditelusuri dari angka awal vs angka target), atau target itu muncul begitu saja tanpa perhitungan?
+P3. "Data/Losses ke Target SMART": apakah target yang ditetapkan punya justifikasi ANGKA yang jelas dari data losses/kondisi awal (misal target reduksi 30% harus bisa ditelusuri dari angka awal vs angka target), dengan satuan dan basis yang sama, atau target itu muncul begitu saja tanpa perhitungan?
 P4. "Problem Statement ke Kepala Ikan Fishbone": apakah efek/masalah utama di kepala ikan SAMA dengan problem statement, atau melenceng ke masalah lain?
-P5. "Kategori 4M pada Fishbone": untuk SETIAP cabang, apakah penyebabnya masuk akal di kategori 4M itu? Sebutkan SPESIFIK cabang yang salah kategori kalau ada.
-P6. "Cabang Fishbone ke Rantai Why-Why": apakah analisis why-why benar-benar berangkat dari salah satu cabang/penyebab di fishbone (bukan topik baru yang tiba-tiba muncul)? DAN untuk SETIAP pasangan why berurutan, apakah why berikutnya penyebab TEKNIS LANGSUNG dari why sebelumnya (bukan cuma berkaitan tema)? Sebutkan link why-ke-berapa yang lemah/meloncat kalau ada.
-P7. "Root Cause Akhir ke Bukti Pendukung": KRITIKAL: Evaluasi apakah SETIAP root cause akhir benar-benar merupakan FAKTA yang BISA DIBUKTIKAN secara objektif di dokumen, atau hanya berupa ASUMSI/POTENSI/HIPOTESIS (misalnya: peserta mengklaim "terjadi reaksi kimia X" tapi tidak ada lampiran hasil uji lab, atau mengklaim "operator kelelahan" tanpa data beban kerja). Jika ada root cause yang bersifat spekulatif, asumtif, atau "masih potensi" tanpa pembuktian data/validasi teknis di dokumen, status P7 WAJIB "LEMAH". Sebutkan secara spesifik root cause mana yang hanya berupa tebakan/potensi.
+P5. "Kategori 4M pada Fishbone": untuk SETIAP cabang, apakah penyebabnya masuk akal di kategori itu? Sebutkan SPESIFIK cabang yang salah kategori kalau ada. Pemakaian kategori tambahan (Measurement, Environment — 5M1E/6M) TIDAK otomatis salah.
+P6. "Cabang Fishbone ke Rantai Why-Why": apakah analisis why-why benar-benar berangkat dari salah satu cabang/penyebab di fishbone (bukan topik baru yang tiba-tiba muncul)? DAN untuk SETIAP pasangan why berurutan, apakah why berikutnya penyebab TEKNIS LANGSUNG dari why sebelumnya untuk proses di area ini (bukan cuma berkaitan tema)? Sebutkan link why-ke-berapa yang lemah/meloncat kalau ada.
+P7. "Root Cause Akhir ke Bukti Pendukung": KRITIKAL: Evaluasi apakah SETIAP root cause akhir benar-benar merupakan FAKTA yang BISA DIBUKTIKAN secara objektif di dokumen (data pengukuran, hasil uji lab/QC, trial, foto kondisi aktual), atau hanya berupa ASUMSI/POTENSI/HIPOTESIS (misalnya: peserta mengklaim "terjadi reaksi kimia X" tanpa lampiran hasil uji lab, atau "operator kelelahan" tanpa data beban kerja). Jika ada root cause yang spekulatif tanpa pembuktian, status P7 WAJIB "LEMAH". Sebutkan secara spesifik root cause mana yang hanya berupa tebakan/potensi.
 
 ## FASE DO (D1-D4)
 D1. "Root Cause ke Action Plan": apakah action plan menyasar ROOT CAUSE AKHIR (why paling dalam), bukan cuma menambal gejala di why tingkat awal?
 D2. "Kesesuaian PIC dengan Action Plan": apakah PIC yang ditugaskan (dan jabatannya, kalau disebutkan) masuk akal untuk jenis pekerjaan action plan itu (misal perbaikan mesin ditugaskan ke bagian teknik/maintenance, bukan ke HR/admin)?
-D3. "Status FUP ke Klaim Implementasi": kalau FUP belum disetujui/approved, apakah masih masuk akal dokumen mengklaim action plan sudah terlaksana penuh dan distandardisasi? (ini red flag prosedural kalau tidak konsisten)
+D3. "Status FUP ke Klaim Implementasi": kalau FUP belum disetujui/approved, apakah masih masuk akal dokumen mengklaim action plan sudah terlaksana penuh dan distandardisasi? (red flag prosedural kalau tidak konsisten)
 D4. "Rencana ke Bukti Pelaksanaan": apakah dokumentasi pelaksanaan (foto, laporan trial) menunjukkan PERSIS action plan yang direncanakan, bukan sesuatu yang berbeda?
 
 ## FASE CHECK (C1-C2)
-C1. "Metodologi & SCOPE Pengukuran Awal vs Akhir": KRITIKAL: Periksa apakah cara mengukur DAN SKALA/SCOPE hasil akhir SEPADAN dengan kondisi awal! (Misal: Jika masalah awal & targetnya adalah "Mesin A", maka hasil akhirnya juga harus untuk "Mesin A". Jika hasil akhir diklaim untuk "Seluruh Pabrik" padahal target hanya 1 mesin, ini manipulasi data dan WAJIB ditandai TIDAK KONSISTEN/LEMAH).
+C1. "Metodologi & SCOPE Pengukuran Awal vs Akhir": KRITIKAL: Periksa apakah cara mengukur, SATUAN/BASIS, periode, DAN SKALA/SCOPE hasil akhir SEPADAN dengan kondisi awal. (Misal: jika masalah awal & target adalah "Mesin A", hasil akhir juga harus untuk "Mesin A"; jika hasil diklaim untuk "Seluruh Pabrik" padahal target hanya 1 mesin, tandai TIDAK KONSISTEN.) Untuk konsumsi energi/material, periksa apakah sudah dinormalisasi terhadap volume produksi/beban (misal per ton) — perbandingan angka absolut pada periode dengan produksi berbeda adalah LEMAH.
 C2. "Target Awal ke Hasil Akhir": apakah angka target awal benar-benar dijawab hasil akhir yang dilaporkan secara spesifik, tanpa pergeseran target yang tidak dijelaskan?
 
 ## FASE ACT (A1-A4)
-A1. "Action Plan Efektif ke Standardisasi": apakah dokumen standar (SOP/IK/OPL/dst) yang dibuat memang RELEVAN dan mengunci action plan spesifik itu (bukan dokumen standar generik yang tidak nyambung)?
-A2. "Standardisasi ke Validasi/Approval": apakah standar yang disosialisasikan (poin sosialisasi) adalah standar YANG SAMA dengan yang sudah divalidasi/disahkan, bukan draft berbeda?
+A1. "Action Plan Efektif ke Standardisasi": apakah dokumen standar (SOP/IK/OPL/CILT/centerline, dst) yang dibuat memang RELEVAN dan mengunci action plan spesifik itu (bukan dokumen standar generik yang tidak nyambung)?
+A2. "Standardisasi ke Validasi/Approval": apakah standar yang disosialisasikan adalah standar YANG SAMA dengan yang sudah divalidasi/disahkan, bukan draft berbeda?
 A3. "Sosialisasi ke Sasaran yang Tepat": apakah pihak yang mengikuti sosialisasi (dari bukti absensi) memang pihak yang relevan/terlibat di area masalah (sesuai Who/PIC di 5W1H)? Gunakan tanggal AKTUAL pelaksanaan sosialisasi (bukan tanggal berlaku template formulir) kalau relevan untuk memeriksa urutan waktu.
-A4. "Standardisasi/Action Plan ke Kelayakan Replikasi": apakah area/mesin yang diklaim direplikasi punya karakteristik yang sepadan/sejenis dengan area asal masalah (sehingga replikasi itu masuk akal secara teknis), bukan cuma diklaim "direplikasi" tanpa penjelasan kesesuaian?
+A4. "Standardisasi/Action Plan ke Kelayakan Replikasi": apakah area/mesin yang diklaim direplikasi punya karakteristik yang sepadan/sejenis dengan area asal masalah, bukan cuma diklaim "direplikasi" tanpa penjelasan kesesuaian? Jika dokumen menyatakan tidak dapat direplikasi, apakah alasan teknisnya masuk akal untuk area ini?
 
 Untuk tiap titik, beri verdict SALAH SATU dari: "KONSISTEN" (jelas dan masuk akal, didukung angka/isi konkret), "LEMAH" (ada tapi kurang detail/agak dipaksakan/tidak ada angka jelas, atau root cause masih bersifat "potensi"), atau "TIDAK KONSISTEN" (ada loncatan logika/manipulasi scope/tidak nyambung/tidak ditemukan).
 
@@ -893,34 +1078,37 @@ Keluarkan HANYA JSON array valid dengan skema persis (field "fase" WAJIB salah s
 [{{"no": "P1", "fase": "PLAN", "tahap": "5G ke 5W1H", "verdict": "KONSISTEN", "temuan": "penjelasan spesifik merujuk isi dan angka konkret dari dokumen, sebutkan halaman DAN isinya"}}]"""
 
 
-def prompt_kritis(laporan_ekstraksi, raw_alur):
+def prompt_kritis(laporan_ekstraksi, raw_alur, area=""):
     return (
         "Anda berperan sebagai Analis Kritis (Tinjauan Independen) yang skeptis secara metodologis dan sangat teliti dalam audit Kaizen ini. Tugas Anda mengidentifikasi kelemahan KOHERENSI dan LOGIKA, bukan cuma kelengkapan administratif, berdasarkan fakta yang ada (jangan mengarang temuan). JANGAN cuma menyebut nomor halaman — selalu jelaskan ISI KONKRET dan ANGKA yang jadi dasar analisis Anda.\n\n"
-        f"Fakta Kasus:\n{laporan_ekstraksi}\n\n"
+        + blok_area(area)
+        + f"Fakta Kasus:\n{laporan_ekstraksi}\n\n"
         f"HASIL AUDIT KONSISTENSI METODOLOGI PDCA:\n{raw_alur}\n\n"
         "Periksa dan pertanyakan secara spesifik, dengan mengacu ke hasil audit di atas:\n"
         "- Titik mana saja (di fase manapun) yang berstatus 'LEMAH' atau 'TIDAK KONSISTEN' — jelaskan isi temuannya dan kenapa itu masalah serius untuk kredibilitas penilaian.\n"
-        "- Kelemahan bukti, celah antara masalah dan solusi, kurangnya data pendukung, manipulasi scope (target 1 mesin vs hasil 1 pabrik), atau potensi manipulasi angka saving.\n\n"
-        "Sertakan alasan yang merujuk ke fakta di atas untuk tiap temuan."
+        "- Kelemahan bukti, celah antara masalah dan solusi, kurangnya data pendukung, manipulasi scope (target 1 mesin vs hasil 1 pabrik), angka yang tidak dinormalisasi terhadap produksi, atau potensi manipulasi angka saving.\n"
+        "- Klaim teknis yang tidak masuk akal untuk proses di area ini (gunakan konteks area).\n\n"
+        "Kelompokkan temuan per kriteria rubrik terkait (sebut nomor kriteria 1-21) dan sertakan alasan yang merujuk ke fakta di atas untuk tiap temuan."
     )
 
 
-def prompt_konfirmatif(laporan_ekstraksi, temuan_kritis):
+def prompt_konfirmatif(laporan_ekstraksi, temuan_kritis, area=""):
     return (
-        "Anda berperan sebagai Analis Konfirmatif (Tinjauan Pembanding) dalam audit Kaizen ini. Tugas Anda mengevaluasi HANYA berdasarkan fakta yang tersedia, bukan asumsi baik yang tidak berdasar, untuk menyeimbangkan temuan Analisis Kritis di atas.\n\n"
-        f"Fakta:\n{laporan_ekstraksi}\n\n"
+        "Anda berperan sebagai Analis Konfirmatif (Tinjauan Pembanding) dalam audit Kaizen ini. Tugas Anda mengevaluasi HANYA berdasarkan fakta yang tersedia, bukan asumsi baik yang tidak berdasar, untuk menyeimbangkan temuan Analisis Kritis.\n\n"
+        + blok_area(area)
+        + f"Fakta:\n{laporan_ekstraksi}\n\n"
         f"Temuan Analisis Kritis:\n{temuan_kritis}\n\n"
-        "Bantah temuan yang tidak berdasar dan soroti nilai tambah yang sudah terbukti dari fakta di atas."
+        "Untuk SETIAP temuan kritis, nyatakan salah satu: 'DIDUKUNG FAKTA', 'SEBAGIAN', atau 'TIDAK BERDASAR', dengan alasan merujuk fakta (misal temuan kritis menganggap data tidak ada padahal ada di bagian lain dokumen, atau menghukum istilah yang sebenarnya lazim di area ini). Lalu soroti nilai tambah yang sudah terbukti dari fakta di atas. Sebut nomor kriteria rubrik terkait."
     )
 
 
-def prompt_skoring(laporan_ekstraksi, raw_verifikasi, temuan_kritis, temuan_konfirmatif, raw_alur):
+def prompt_skoring(laporan_ekstraksi, raw_verifikasi, temuan_kritis, temuan_konfirmatif, raw_alur, area=""):
     return f"""Anda adalah modul Sintesis Skoring Rubrik yang wajib bersikap objektif, konsisten, dan KRITIS TERHADAP ISI — bukan cuma mengecek "ada/tidak ada elemen", tapi memverifikasi apakah isinya benar secara logika, tepat kategorinya, dan nyambung alur PDCA-nya.
 
-ATURAN PENILAIAN:
+{blok_area(area)}ATURAN PENILAIAN:
 - Beri skor SESUAI pilihan yang tersedia per kriteria (jangan beri skor di luar pilihan yang tercantum di rubrik).
 - Ikuti PERSIS deskripsi tiap tingkat skor di rubrik di bawah — jangan menebak sendiri artinya.
-- JANGAN PERNAH menulis justifikasi yang cuma menyebut nomor halaman tanpa penjelasan (misal "ada di halaman 24 dan 31" SAJA itu DILARANG) — selalu jelaskan ISI KONKRET dan ANGKA/MEASUREMENT yang mendasari skor itu.
+- JANGAN PERNAH menulis justifikasi yang cuma menyebut nomor halaman tanpa penjelasan — selalu jelaskan ISI KONKRET dan ANGKA/MEASUREMENT yang mendasari skor itu.
 - Pertimbangkan bahwa target/masalah/hasil bisa tertulis IMPLISIT (tersirat), bukan cuma yang eksplisit — cek penanda EKSPLISIT/IMPLISIT di data ekstraksi.
 - Peta pemakaian bukti audit per kriteria:
   * Kriteria 1 (5G): pakai HASIL AUDIT KONSISTENSI METODOLOGI titik P1.
@@ -931,26 +1119,29 @@ ATURAN PENILAIAN:
   * Kriteria 9 (Bukti Akar Penyebab): pakai titik P7.
   * Kriteria 10 (Ketepatan Root Cause): pakai titik P6 dan P7 bersama. JANGAN berikan skor 2 jika P7 berstatus LEMAH akibat adanya root cause yang bersifat asumtif, spekulatif, atau berupa "potensi" yang belum dibuktikan validitasnya secara teknis (misal: menebak ada reaksi kimia tanpa uji lab). Root cause final haruslah fakta teruji.
   * Kriteria 11 (Action Plan & PIC) & 12 (Rencana Perbaikan): pakai titik D1 dan D2.
-  * Kriteria 13 (FUP): Berdasarkan aturan IMS Perusahaan, FUP (Form Usulan Perbaikan) ADALAH MUTLAK WAJIB untuk SEMUA jenis project improvement tanpa terkecuali, sebagai alat identifikasi risiko tersembunyi. JANGAN PERNAH memberikan skor 5 jika dokumen FUP yang sah (hasil Verifikasi Visual D: ada kop surat, judul FUP, dan sudah ditandatangani/approved) tidak dilampirkan, meskipun action plan sudah berjalan atau ada dokumen OPL/Sosialisasi. Jika tidak ada bukti FUP yang sah, SKOR WAJIB NOL (0).
+  * {ATURAN_FUP_SKOR}
   * Kriteria 14 (Pelaksanaan): pakai titik D4.
+  * Kriteria 15 (Dokumentasi Pelaksanaan): pakai bagian IMPLEMENTASI di ekstraksi, hasil VERIFIKASI foto, dan titik D4.
   * Kriteria 16 (Pencapaian Target): pakai titik C1 dan C2 BERSAMA — kalau metodologi pengukuran atau SCOPE/SKALA target vs hasil (C1) tidak sepadan (misal target 1 mesin diklaim hasil 1 pabrik), skor WAJIB diturunkan drastis meski angkanya kelihatan mencapai target.
   * Kriteria 17 (Pengecekan Hasil): pakai titik C1.
   * Kriteria 18 (Standardisasi) & 19 (Validasi): pakai titik A1 dan A2.
   * Kriteria 20 (Sosialisasi): pakai titik A3.
   * Kriteria 21 (Replikasi): pakai titik A4.
-  Kalau titik yang relevan berstatus "TIDAK KONSISTEN" atau "LEMAH", skor kriteria itu WAJIB ikut diturunkan dan justifikasi WAJIB menyebutkan temuan spesifik dari titik tersebut (bukan cuma menyebut kode titiknya, tapi isi temuannya).
-- Kalau GATE CHECK di hasil verifikasi menyatakan "TIDAK LAYAK" (bukan proyek improvement), sebutkan ini secara eksplisit di justifikasi kriteria 1-5 (tahap Plan) karena ini mempengaruhi validitas keseluruhan submission — tapi tetap beri skor per kriteria sesuai bukti yang ada (jangan otomatis nol semua tanpa dasar).
-- Bersikap ketat: skor tinggi hanya untuk bukti yang benar-benar kuat, lengkap, DAN koheren secara logika.
+  Kalau titik yang relevan berstatus "TIDAK KONSISTEN" atau "LEMAH", skor kriteria itu WAJIB ikut diturunkan dan justifikasi WAJIB menyebutkan temuan spesifik dari titik tersebut (isi temuannya, bukan cuma kodenya).
+- Kalau GATE CHECK di hasil verifikasi menyatakan "TIDAK LAYAK" (bukan proyek improvement), sebutkan ini secara eksplisit di justifikasi kriteria 1-5 (tahap Plan) — tapi tetap beri skor per kriteria sesuai bukti yang ada (jangan otomatis nol semua tanpa dasar).
+- Bila Analisis Konfirmatif menyatakan suatu temuan kritis 'TIDAK BERDASAR' dengan rujukan fakta, jangan menurunkan skor karena temuan itu.
+
+{KALIBRASI_SKOR}
 
 ATURAN PENENTUAN KEBUTUHAN VALIDASI MANUAL:
-Selain skor dan justifikasi, untuk SETIAP kriteria tentukan juga apakah kriteria itu PERLU DIVALIDASI MANUAL oleh asesor lapangan, dengan mengisi field "perlu_validasi_manual" ("YA" atau "TIDAK") dan "alasan_validasi_manual" (WAJIB diisi 1 kalimat spesifik kalau "YA"; kosongkan "" kalau "TIDAK"). Tandai "YA" jika salah satu berlaku:
-(a) Bukti di dokumen ini bersifat implisit/tidak eksplisit sehingga interpretasinya bisa diperdebatkan.
-(b) Ada perbedaan/konflik antara temuan Analisis Kritis dan Analisis Konfirmatif, atau titik Audit Konsistensi Metodologi terkait berstatus LEMAH/TIDAK KONSISTEN.
-(c) Kriteria ini pada dasarnya membutuhkan verifikasi terhadap kondisi fisik/lapangan aktual yang tidak mungkin dipastikan hanya dari dokumen atau foto (misal: kesesuaian SOP yang tertempel di lokasi kerja, kepastian eksekusi PIC sesuai jadwal riil, kesesuaian teknis area tujuan replikasi).
-(d) Skor bergantung pada asumsi karena data yang tersedia tidak lengkap/ambigu.
-Tandai "TIDAK" jika bukti dokumen sudah eksplisit, konsisten antar agen, dan tidak memerlukan pengecekan fisik lapangan tambahan.
+Untuk SETIAP kriteria tentukan apakah PERLU DIVALIDASI MANUAL oleh asesor lapangan, dengan mengisi field "perlu_validasi_manual" ("YA" atau "TIDAK") dan "alasan_validasi_manual" (WAJIB 1 kalimat spesifik kalau "YA"; kosongkan "" kalau "TIDAK"). Tandai "YA" jika salah satu berlaku:
+(a) Bukti di dokumen bersifat implisit/tidak eksplisit sehingga interpretasinya bisa diperdebatkan.
+(b) Ada konflik antara Analisis Kritis dan Analisis Konfirmatif, atau titik Audit Konsistensi Metodologi terkait berstatus LEMAH/TIDAK KONSISTEN.
+(c) Kriteria ini membutuhkan verifikasi kondisi fisik/lapangan aktual yang tidak mungkin dipastikan dari dokumen/foto.
+(d) Skor bergantung pada asumsi karena data tidak lengkap/ambigu, atau Anda memakai ATURAN RAGU.
+Tandai "TIDAK" jika bukti dokumen sudah eksplisit, konsisten, dan tidak memerlukan pengecekan fisik lapangan tambahan.
 
-Referensi tipe kriteria yang secara struktural SERING (bukan otomatis SELALU) membutuhkan verifikasi lapangan — gunakan sebagai bahan pertimbangan, bukan aturan baku, karena keputusan akhir HARUS berdasarkan isi dokumen spesifik ini:
+Referensi tipe kriteria yang secara struktural SERING (bukan otomatis SELALU) membutuhkan verifikasi lapangan — bahan pertimbangan, bukan aturan baku:
 {_DAFTAR_RUJUKAN_VALIDASI_STR}
 
 RUBRIK LENGKAP (deskripsi tiap tingkat skor):
@@ -968,47 +1159,60 @@ TEMUAN ANALISIS KRITIS (pertimbangkan temuan ini dalam penilaian):
 TEMUAN ANALISIS KONFIRMATIF:
 {temuan_konfirmatif}
 
-Keluarkan HANYA JSON array valid, tanpa teks lain, dengan skema persis (justifikasi harus spesifik, menyebutkan ISI dan ANGKA konkret dari dokumen serta hasil audit alur logika/verifikasi, minimal 1-2 kalimat menjelaskan MENGAPA skor itu diberikan — DILARANG hanya menyebut nomor halaman tanpa penjelasan isinya; WAJIB juga isi field perlu_validasi_manual dan alasan_validasi_manual sesuai aturan di atas):
-[{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik merujuk isi dokumen dan analisis koherensi, sebutkan angka/isi konkret", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}}]
+Keluarkan HANYA JSON array valid berisi TEPAT 21 objek (kriteria 1-21), tanpa teks lain, dengan skema persis:
+[{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "Bukti: ... (hal. X) → Penilaian: ...", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}}]
 
 HASIL AUDIT KONSISTENSI METODOLOGI PDCA:
 {raw_alur}"""
 
 
-def prompt_saving(laporan_ekstraksi):
-    daftar_kategori_str = ", ".join(KATEGORI_IMPACT_14)
+def prompt_saving(laporan_ekstraksi, area=""):
+    daftar_kategori_str = "\n".join(f"- {k}: {DEFINISI_IMPACT[k]}" for k in KATEGORI_IMPACT_14)
+    daftar_saving_str = "\n".join(f"- {k}: {DEFINISI_SAVING[k]}" for k in KATEGORI_SAVING)
     return f"""Anda adalah Analis Dampak Operasional yang menilai dampak operasional dari dokumen Kaizen ini secara objektif berdasarkan bukti tertulis saja.
 
-ATURAN MEMBACA TABEL IMPACT/MANFAAT: dokumen Kaizen sering memuat tabel dengan format 'kategori impact | ambang batas skor rendah | ambang batas skor tinggi | penjelasan'. Dua kolom di tengah (misal 'Mengurangi ≤ 1%' vs 'Mengurangi >5%') adalah AMBANG BATAS/SKALA PENILAIAN GENERIK yang SELALU muncul di semua baris kategori terlepas dari relevansinya dengan proyek ini — ini BUKAN bukti pencapaian aktual. Kolom 'PENJELASAN'/'keterangan' di ujung kanan tabel adalah SATU-SATUNYA kolom yang berisi pencapaian AKTUAL proyek ini. Kalau kolom penjelasan untuk suatu kategori KOSONG SEPENUHNYA (tidak ada satu kalimat pun), kategori itu TIDAK diukur/tidak terdampak oleh proyek ini — JANGAN mengarang atau menyimpulkan pencapaian dari angka ambang batas skala pada kolom tengah.
+{blok_area(area)}ATURAN MEMBACA TABEL IMPACT/MANFAAT: dokumen Kaizen sering memuat tabel dengan format 'kategori impact | ambang batas skor rendah | ambang batas skor tinggi | penjelasan'. Dua kolom di tengah (misal 'Mengurangi ≤ 1%' vs 'Mengurangi >5%') adalah AMBANG BATAS/SKALA PENILAIAN GENERIK yang SELALU muncul di semua baris — ini BUKAN bukti pencapaian aktual. Kolom 'PENJELASAN'/'keterangan' di ujung kanan tabel adalah SATU-SATUNYA kolom yang berisi pencapaian AKTUAL proyek ini. Kalau kolom penjelasan untuk suatu kategori KOSONG SEPENUHNYA, kategori itu TIDAK diukur/tidak terdampak — JANGAN mengarang pencapaian dari angka ambang batas.
+
+ATURAN VALIDASI ANGKA:
+- Periksa apakah ada baseline (sebelum) dan hasil (sesudah) dengan satuan & periode yang sama.
+- Untuk energi (gas/steam/listrik), air, dan material: periksa apakah dinormalisasi terhadap volume produksi/beban (per ton, per unit). Jika tidak dinormalisasi padahal produksi before vs after berbeda, sebutkan di keterangan dan gunakan 'TIDAK YAKIN'.
+- Untuk nilai rupiah: periksa apakah ada harga satuan dan dasar annualisasi (mis. per bulan × 12).
+- Jika angka tidak masuk akal secara teknis untuk proses di area ini (gunakan konteks area), gunakan 'TIDAK YAKIN' dan jelaskan.
 
 FAKTA DOKUMEN:
 {laporan_ekstraksi}
 
-Evaluasi {len(KATEGORI_IMPACT_14)} kategori impact berikut: {daftar_kategori_str}.
-Untuk setiap kategori, status HARUS salah satu dari: 'IYA' (ada dampak terbukti dengan KETERANGAN/PENJELASAN AKTUAL yang jelas di dokumen — bukan sekadar ambang batas skala penilaian), 'TIDAK' (tidak ada dampak/tidak disebutkan sama sekali, ATAU kolom penjelasan/keterangan untuk kategori itu kosong), atau 'TIDAK YAKIN' (ADA keterangan/penjelasan tapi tidak lengkap/ambigu/tidak cukup data pendukung).
+BAGIAN 1 — IMPACT PROJECT. Evaluasi {len(KATEGORI_IMPACT_14)} kategori berikut (definisi resmi rubrik perusahaan):
+{daftar_kategori_str}
+Untuk setiap kategori, status HARUS salah satu dari: 'IYA' (ada dampak terbukti dengan KETERANGAN/PENJELASAN AKTUAL yang jelas di dokumen — bukan sekadar ambang batas skala penilaian), 'TIDAK' (tidak ada dampak/tidak disebutkan sama sekali, ATAU kolom penjelasan untuk kategori itu kosong), atau 'TIDAK YAKIN' (ADA keterangan tapi tidak lengkap/ambigu/tidak dinormalisasi/tidak cukup data pendukung).
+Nilai sesuai DEFINISI di atas, bukan sekadar kata yang mirip: misal 'Quality' = mengurangi risiko/insiden kualitas (bukan sekadar menyebut kata kualitas), 'SOC & HTA' = sumber pengotor atau area sulit terjangkau.
 
-SELAIN itu, tentukan juga 'Jenis Saving' berdasarkan dokumen. Pilihan statusnya adalah: 'Hard Saving' (saving finansial nyata >100 juta rupiah/tahun, terkait penurunan pemakaian gas/listrik/air/pembelian material/manpower), 'Virtual/Soft Saving' (saving tidak real, berupa opportunity loss yang dihindari, cost avoidance, material balance/stock akurasi, atau penurunan customer complaint), 'Keduanya', atau 'Tidak Ada'. 
-PENTING ANTI-MANIPULASI: Anda DILARANG KERAS melabeli 'Hard Saving' jika dokumen HANYA MENCANTUMKAN ANGKA TOTAL (misal 'Saving Rp 200 Juta') tanpa ada rincian perhitungan atau parameter sebelum/sesudah yang jelas. Jika tidak ada rincian yang valid, turunkan statusnya menjadi 'Tidak Yakin' atau 'Virtual/Soft Saving'.
-WAJIB JELASKAN ALASAN MENGAPA Anda mengkategorikannya sebagai Hard/Soft Saving di kolom keterangan. JANGAN KOSONGKAN keterangan untuk Jenis Saving.
+BAGIAN 2 — JENIS SAVING. Evaluasi 2 baris berikut SECARA TERPISAH (keduanya bisa 'IYA' sekaligus), status 'IYA' / 'TIDAK' / 'TIDAK YAKIN':
+{daftar_saving_str}
+PENTING ANTI-MANIPULASI untuk 'Hard Saving (>100 Jt)': status 'IYA' HANYA jika ada rincian perhitungan yang bisa ditelusuri (parameter/konsumsi sebelum vs sesudah, harga satuan, volume, dan periode) DAN totalnya > Rp 100 juta. Jika dokumen HANYA mencantumkan angka total (misal 'Saving Rp 200 Juta') tanpa rincian, atau periode/basis perhitungannya tidak jelas, gunakan 'TIDAK YAKIN'. Sebutkan juga periode yang dipakai dokumen (per bulan/per tahun) — jangan mengasumsikan sendiri.
+Saving yang berasal dari material balance, stock akurasi, customer complain, atau biaya yang dihindari termasuk 'Virtual Saving / Cost Avoidance', BUKAN Hard Saving.
+WAJIB JELASKAN ALASAN (sebut angka & rincian perhitungan yang ditemukan) di kolom keterangan untuk kedua baris saving. JANGAN KOSONGKAN.
 
 Keluarkan HANYA JSON array valid dengan skema persis:
 [{{"kategori": "Air", "status": "TIDAK", "keterangan": "alasan singkat merujuk dokumen"}}]"""
 
 
-def prompt_feedback(laporan_ekstraksi, raw_verifikasi, raw_alur, raw_skoring):
+def prompt_feedback(laporan_ekstraksi, raw_verifikasi, raw_alur, raw_skoring, area=""):
     return f"""Anda berperan sebagai narasumber pembinaan (coaching) Kaizen yang memberikan umpan balik konstruktif untuk PESERTA kompetisi (bukan untuk juri). Bahasa harus suportif, jelas, mudah dicerna oleh peserta yang levelnya beragam (sebagian belum paham PDCA dengan baik) — kritik boleh tegas dan jujur, tapi disampaikan dengan cara yang mendidik dan tidak menjatuhkan semangat.
+
+{blok_area(area)}Gunakan istilah teknis area ini agar saran konkret dan relevan (misal sebutkan parameter proses apa yang sebaiknya diukur, alat ukur/data QC apa yang bisa dipakai sebagai bukti, dan bagaimana menormalisasi angka). Jangan menyarankan hal yang tidak berlaku di proses area ini.
 
 Untuk MASING-MASING 6 kategori tetap di bawah, isi 3 kolom: "kekuatan" (apa yang sudah bagus, sebutkan konkret — kalau memang tidak ada yang menonjol, boleh tulis "Belum ada yang menonjol di bagian ini"), "area_perbaikan" (apa yang paling perlu ditingkatkan, jelaskan KENAPA), dan "saran_konkret" (langkah nyata dan actionable yang bisa dilakukan peserta, bukan saran generik).
 
 6 KATEGORI TETAP:
-1. "Struktur & Kejelasan Penulisan" — organisasi paper, ada tidaknya typo/salah ketik yang mengganggu, konsistensi format/penomoran, kejelasan bahasa (rujuk temuan kualitas penulisan dari hasil ekstraksi bila ada; JANGAN mengangkat tanggal berlaku template dokumen kontrol sebagai contoh kesalahan penulisan).
+1. "Struktur & Kejelasan Penulisan" — organisasi paper, typo yang mengganggu, konsistensi format/penomoran, kejelasan bahasa (rujuk temuan kualitas penulisan dari hasil ekstraksi bila ada; JANGAN mengangkat tanggal berlaku template dokumen kontrol sebagai contoh kesalahan).
 2. "Perumusan Problem Statement" — apakah masalah dirumuskan dengan jelas, spesifik, dan didukung data (bukan cuma opini/dugaan).
-3. "Kesesuaian Goal/Target dengan Objective Awal" — apakah target yang ditetapkan di awal benar-benar terjawab oleh hasil akhir, dan apakah target itu sendiri masuk akal/berdasar data. (Tegur keras jika ada manipulasi scope/skala hasil akhir).
-4. "Kedalaman Analisis Akar Masalah" — kualitas fishbone dan why-why analysis: apakah benar-benar sampai ke akar masalah teknis, atau masih berupa tebakan/potensi tanpa uji coba (rujuk evaluasi kriteria 10/P7).
-5. "Kekuatan Bukti & Data Pendukung" — apakah klaim-klaim (masalah, hasil, saving) didukung data/foto yang jelas (bukan foto before-after yang dimanipulasi) dan measurement yang konkret, atau banyak yang cuma klaim tanpa bukti.
-6. "Standardisasi & Keberlanjutan" — apakah perbaikan ini benar-benar dikunci supaya tidak terulang (SOP/standar) dan kelengkapan dokumen FUP (rujuk jika peserta gagal melampirkan FUP resmi).
+3. "Kesesuaian Goal/Target dengan Objective Awal" — apakah target di awal terjawab oleh hasil akhir, dan apakah target itu berdasar data. (Tegur keras jika ada manipulasi scope/skala hasil akhir).
+4. "Kedalaman Analisis Akar Masalah" — kualitas fishbone dan why-why: apakah sampai ke akar masalah teknis, atau masih tebakan/potensi tanpa uji coba (rujuk evaluasi kriteria 10/P7).
+5. "Kekuatan Bukti & Data Pendukung" — apakah klaim (masalah, hasil, saving) didukung data/foto yang jelas dan measurement yang konkret serta ternormalisasi, atau banyak yang cuma klaim tanpa bukti.
+6. "Standardisasi & Keberlanjutan" — apakah perbaikan dikunci supaya tidak terulang (SOP/standar) dan kelengkapan dokumen FUP (rujuk jika peserta gagal melampirkan FUP resmi).
 
-Setelah 6 kategori tetap itu, BOLEH tambahkan 0-2 baris tambahan dengan kategori "Catatan Tambahan" untuk temuan penting lain yang tidak masuk 6 kategori di atas (kalau memang ada yang signifikan; kalau tidak ada, tidak usah dipaksakan).
+Setelah 6 kategori tetap itu, BOLEH tambahkan 0-2 baris dengan kategori "Catatan Tambahan" untuk temuan penting lain (kalau memang signifikan; jangan dipaksakan).
 
 FAKTA EKSTRAKSI:
 {laporan_ekstraksi}
@@ -1071,19 +1275,20 @@ _JUDUL_BAGIAN = r"(MASALAH|TARGET|FISHBONE|ANALISIS\s*5|ACTION|IMPLEMENTASI|HASI
 
 
 def pecah_bagian_ekstraksi(laporan):
-    pola = re.compile(rf"(?im)^[#*\s_>\-]*([1-9])\s*[.)]\s*[*_\s]*{_JUDUL_BAGIAN}")
+    pola = re.compile(rf"(?im)^[#*\s_>\-]*([0-9])\s*[.)]\s*[*_\s]*({_JUDUL_BAGIAN[1:-1]}|IDENTITAS)")
     laporan = laporan or ""
     cocok = list(pola.finditer(laporan))
     bagian = {}
     for i, m in enumerate(cocok):
         akhir = cocok[i + 1].start() if i + 1 < len(cocok) else len(laporan)
         bagian.setdefault(int(m.group(1)), laporan[m.start():akhir].strip())
-    return bagian if len(bagian) >= 5 else {}  # kalau format tak terbaca → pakai seluruh teks
+    return bagian if len([n for n in bagian if n >= 1]) >= 5 else {}  # format tak terbaca → pakai seluruh teks
 
 
 def ambil_bagian(laporan, bagian, nomor):
     if not bagian:
         return laporan
+    nomor = [0] + [n for n in nomor if n != 0]  # identitas selalu ikut (pendek, memberi konteks area/mesin)
     teks = "\n\n".join(bagian[n] for n in nomor if n in bagian)
     return teks or laporan
 
@@ -1104,8 +1309,8 @@ def _filter_alur_fase(prompt, fase_dipilih):
     return prompt[:awal] + catatan + "".join(pilih) + prompt[akhir:]
 
 
-def groq_audit_logika(laporan, bagian, verif, log):
-    kerangka_full = prompt_alur("§LAPORAN§", "§VERIF§")
+def groq_audit_logika(laporan, bagian, verif, area, log):
+    kerangka_full = prompt_alur("§LAPORAN§", "§VERIF§", area)
     hasil = []
     for i, grup in enumerate(GRUP_ALUR, 1):
         kerangka = _filter_alur_fase(kerangka_full, grup["fase"])
@@ -1129,7 +1334,7 @@ PETA_BUKTI = {
     10: "Kriteria 10 (Ketepatan Root Cause): titik audit P6 dan P7 bersama. JANGAN beri skor 2 jika P7 LEMAH akibat root cause asumtif/spekulatif/'potensi' yang belum dibuktikan secara teknis (misal menebak reaksi kimia tanpa uji lab); root cause final harus fakta teruji.",
     11: "Kriteria 11 (Action Plan & PIC): titik audit D1 dan D2.",
     12: "Kriteria 12 (Rencana Perbaikan): titik audit D1 dan D2.",
-    13: "Kriteria 13 (FUP): berdasarkan aturan IMS, FUP WAJIB untuk SEMUA project improvement. JANGAN beri skor 5 jika FUP yang sah (menurut hasil Verifikasi Visual bagian FUP: ada kop surat, judul FUP, sudah ditandatangani/approved) tidak dilampirkan, meskipun ada OPL/sosialisasi. Jika tidak ada bukti FUP yang sah, SKOR WAJIB 0.",
+    13: ATURAN_FUP_SKOR,
     14: "Kriteria 14 (Pelaksanaan Action Plan): titik audit D4.",
     15: "Kriteria 15 (Dokumentasi Pelaksanaan): bukti implementasi di ekstraksi, hasil VERIFIKASI foto, dan titik audit D4.",
     16: "Kriteria 16 (Pencapaian Target): titik audit C1 dan C2 BERSAMA — jika metodologi pengukuran atau SCOPE/SKALA target vs hasil (C1) tidak sepadan (misal target 1 mesin diklaim hasil 1 pabrik), skor WAJIB diturunkan drastis meski angka tampak mencapai target.",
@@ -1163,7 +1368,7 @@ def rubrik_subset(nomor):
     return "\n".join(hasil)
 
 
-def prompt_skoring_ringkas(nomor):
+def prompt_skoring_ringkas(nomor, area=""):
     peta = "\n".join(f"- {PETA_BUKTI[n]}" for n in nomor)
     rujukan = "\n".join(
         f"  · Kriteria {n}: {KRITERIA_RUJUKAN_VALIDASI_MANUAL[n]}" for n in nomor if n in KRITERIA_RUJUKAN_VALIDASI_MANUAL
@@ -1174,16 +1379,18 @@ def prompt_skoring_ringkas(nomor):
 
 Nilai HANYA kriteria nomor: {daftar_nomor}.
 
-ATURAN:
+{blok_area(area)}ATURAN:
 - Skor HARUS salah satu pilihan di rubrik; ikuti PERSIS deskripsi tiap tingkat skor.
 - Justifikasi (1-2 kalimat) WAJIB menyebut ISI KONKRET dan ANGKA/MEASUREMENT dari dokumen; DILARANG hanya menyebut nomor halaman. Target/masalah/hasil bisa tertulis IMPLISIT — cek penanda EKSPLISIT/IMPLISIT di data ekstraksi.
 - Bukti audit yang dipakai per kriteria:
 {peta}
 - Jika titik audit terkait berstatus "LEMAH" atau "TIDAK KONSISTEN", skor WAJIB diturunkan dan justifikasi WAJIB menyebut isi temuannya (bukan hanya kode titiknya).
-- Jika GATE CHECK pada hasil verifikasi = "TIDAK LAYAK", sebutkan di justifikasi kriteria tahap Plan, tetapi tetap beri skor sesuai bukti (jangan otomatis nol tanpa dasar).
-- Bersikap ketat: skor tinggi hanya untuk bukti yang kuat, lengkap, DAN koheren secara logika.
-- Isi "perlu_validasi_manual": "YA" (plus "alasan_validasi_manual" 1 kalimat spesifik) jika: (a) bukti implisit/bisa diperdebatkan; (b) ada konflik Analisis Kritis vs Konfirmatif atau titik audit terkait LEMAH/TIDAK KONSISTEN; (c) butuh verifikasi fisik/lapangan yang tak bisa dipastikan dari dokumen/foto (SOP di lokasi, eksekusi PIC sesuai jadwal riil, kesesuaian area replikasi); (d) skor bergantung asumsi karena data tidak lengkap/ambigu. Selain itu "TIDAK" dan alasan "".
+- Jika GATE CHECK pada hasil verifikasi = "TIDAK LAYAK", sebutkan di justifikasi kriteria tahap Plan, tetapi tetap beri skor sesuai bukti.
+- Bila Analisis Konfirmatif menyatakan temuan kritis 'TIDAK BERDASAR' dengan rujukan fakta, jangan menurunkan skor karena temuan itu.
+- Isi "perlu_validasi_manual": "YA" (plus "alasan_validasi_manual" 1 kalimat spesifik) jika: (a) bukti implisit/bisa diperdebatkan; (b) ada konflik Analisis Kritis vs Konfirmatif atau titik audit terkait LEMAH/TIDAK KONSISTEN; (c) butuh verifikasi fisik/lapangan yang tak bisa dipastikan dari dokumen/foto; (d) skor bergantung asumsi atau Anda memakai ATURAN RAGU. Selain itu "TIDAK" dan alasan "".
 {blok_rujukan}
+{KALIBRASI_SKOR}
+
 RUBRIK (kriteria yang dinilai):
 {rubrik_subset(set(nomor))}
 
@@ -1203,7 +1410,7 @@ ANALISIS KONFIRMATIF:
 §KONFIRM§
 
 Keluarkan HANYA JSON array valid (tanpa teks lain), satu objek per kriteria yang dinilai, dengan skema persis:
-[{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "alasan spesifik dengan isi/angka konkret", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}}]"""
+[{{"no": 1, "kriteria": "5G", "skor": 2, "justifikasi": "Bukti: ... (hal. X) → Penilaian: ...", "perlu_validasi_manual": "TIDAK", "alasan_validasi_manual": ""}}]"""
 
 
 def alur_relevan(alur_items, nomor):
@@ -1214,7 +1421,7 @@ def alur_relevan(alur_items, nomor):
     return json.dumps(pilih, ensure_ascii=False) if pilih else ""
 
 
-def groq_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, log, hanya_kriteria=None):
+def groq_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, area, log, hanya_kriteria=None):
     alur_items = bersihkan_dan_parse_json(alur_json)
     bobot = {"§LAPORAN§": 6, "§VERIF§": 2, "§ALUR§": 2, "§KRITIS§": 1, "§KONFIRM§": 1}
 
@@ -1226,7 +1433,7 @@ def groq_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, log, ha
             "§KRITIS§": kritis,
             "§KONFIRM§": konfirmatif,
         }
-        p = muat_di_budget(prompt_skoring_ringkas(nomor), konteks, bobot, GROQ_OUT_SKORING)
+        p = muat_di_budget(prompt_skoring_ringkas(nomor, area), konteks, bobot, GROQ_OUT_SKORING)
         items = _groq_json(p, judul, log, max_output=GROQ_OUT_SKORING)
         return [it for it in items if _ke_int(it.get("no", it.get("No"))) in nomor]
 
@@ -1252,8 +1459,8 @@ def groq_skoring(laporan, bagian, verif, kritis, konfirmatif, alur_json, log, ha
 
 
 # --- Saving & feedback ---
-def groq_saving(laporan, log):
-    kerangka = prompt_saving("§LAPORAN§")
+def groq_saving(laporan, area, log):
+    kerangka = prompt_saving("§LAPORAN§", area)
     p = muat_di_budget(kerangka, {"§LAPORAN§": laporan}, {"§LAPORAN§": 1}, GROQ_MAX_OUTPUT)
     hasil = _groq_json(p, "Analisis Saving", log)
     return json.dumps(hasil, ensure_ascii=False) if hasil else ""
@@ -1279,8 +1486,8 @@ def _skor_ringkas(skor_json):
     )
 
 
-def groq_feedback(laporan, verif, alur_json, skor_json, log):
-    kerangka = prompt_feedback("§LAPORAN§", "§VERIF§", "§ALUR§", "§SKOR§")
+def groq_feedback(laporan, verif, alur_json, skor_json, area, log):
+    kerangka = prompt_feedback("§LAPORAN§", "§VERIF§", "§ALUR§", "§SKOR§", area)
     konteks = {
         "§LAPORAN§": laporan,
         "§VERIF§": verif,
@@ -1296,7 +1503,7 @@ def groq_feedback(laporan, verif, alur_json, skor_json, log):
 # ==========================================
 # 7. PIPELINE MULTI-AGENT
 # ==========================================
-def jalankan_pipeline(uploaded_file, log):
+def jalankan_pipeline(uploaded_file, log, pilihan_area=OPSI_DETEKSI):
     suffix = os.path.splitext(uploaded_file.name)[1] or ".pdf"
     temp_path = None
     gemini_file = None
@@ -1317,13 +1524,26 @@ def jalankan_pipeline(uploaded_file, log):
         if getattr(getattr(gemini_file, "state", None), "name", "") == "FAILED":
             raise RuntimeError("Google AI gagal memproses file PDF ini.")
 
+        manual = pilihan_area != OPSI_DETEKSI
+        area_ekstraksi = konteks_area(pilihan_area) if manual else ""
+
         log.write("🔎 **[1/6] Ekstraksi bukti dokumen**")
-        laporan = panggil_gemini([gemini_file, prompt_ekstraksi()], "Ekstraksi Bukti Dokumen", log, config=CONFIG_TEXT)
+        laporan = panggil_gemini([gemini_file, prompt_ekstraksi(area_ekstraksi)], "Ekstraksi Bukti Dokumen", log, config=CONFIG_TEXT)
         if not laporan:
             raise RuntimeError("Ekstraksi dokumen gagal (respons kosong). Cek API key/model Gemini di sidebar Diagnostik.")
 
+        if manual:
+            area_nama = pilihan_area
+            log.write(f"🏭 Area dipilih manual: **{area_nama}**")
+        else:
+            area_nama, skor_area = deteksi_area(laporan, uploaded_file.name)
+            rincian = ", ".join(f"{k}: {v}" for k, v in sorted(skor_area.items(), key=lambda x: -x[1])[:3])
+            log.write(f"🏭 Area terdeteksi: **{area_nama}** ({rincian or 'tidak ada kata kunci area yang cocok'})")
+        area = konteks_area(area_nama)
+        area_groq = konteks_area(area_nama, ringkas=True)
+
         log.write("🖼️ **[2/6] Verifikasi visual & FUP**")
-        raw_verif = panggil_gemini([gemini_file, prompt_verifikasi()], "Verifikasi Visual & FUP", log, config=CONFIG_JSON)
+        raw_verif = panggil_gemini([gemini_file, prompt_verifikasi(area)], "Verifikasi Visual & FUP", log, config=CONFIG_JSON)
 
         log.write(
             "🔗 **[3/6] Audit logika PDCA** (Gemini & Groq paralel). "
@@ -1333,48 +1553,49 @@ def jalankan_pipeline(uploaded_file, log):
         bagian = pecah_bagian_ekstraksi(laporan)
         if not bagian:
             log.write("ℹ️ Struktur bagian ekstraksi tidak terbaca; Groq memakai seluruh teks (dipotong sesuai budget).")
-        p_alur = prompt_alur(laporan, raw_verif)
+        p_alur = prompt_alur(laporan, raw_verif, area)
         raw_alur_gem, raw_alur_groq = paralel(
             log, catatan,
             lambda lg: panggil_gemini(p_alur, "Audit Logika", lg, config=CONFIG_JSON),
-            lambda lg: groq_audit_logika(laporan, bagian, raw_verif, lg),
+            lambda lg: groq_audit_logika(laporan, bagian, raw_verif, area_groq, lg),
         )
         log.write(f"✅ Audit logika selesai (Gemini: {'OK' if raw_alur_gem else 'GAGAL'}, Groq: {'OK' if raw_alur_groq else 'GAGAL'})")
 
         log.write("🧐 **[4/6] Analisis kritis & konfirmatif**")
-        kritis = panggil_gemini(prompt_kritis(laporan, raw_alur_gem), "Analisis Kritis", log)
-        konfirmatif = panggil_gemini(prompt_konfirmatif(laporan, kritis), "Analisis Konfirmatif", log)
+        kritis = panggil_gemini(prompt_kritis(laporan, raw_alur_gem, area), "Analisis Kritis", log)
+        konfirmatif = panggil_gemini(prompt_konfirmatif(laporan, kritis, area), "Analisis Konfirmatif", log)
 
         log.write("📝 **[5/6] Skoring rubrik & analisis saving** (paralel)")
         alur_groq_pakai = raw_alur_groq
         if not alur_groq_pakai and raw_alur_gem:
             alur_groq_pakai = raw_alur_gem
             log.write("ℹ️ Audit logika Groq kosong; skoring Groq memakai audit logika Gemini sebagai bahan.")
-        p_skor_gem = prompt_skoring(laporan, raw_verif, kritis, konfirmatif, raw_alur_gem)
+        p_skor_gem = prompt_skoring(laporan, raw_verif, kritis, konfirmatif, raw_alur_gem, area)
         raw_skor_gem, raw_skor_groq = paralel(
             log, catatan,
             lambda lg: panggil_gemini(p_skor_gem, "Skoring Rubrik", lg, config=CONFIG_JSON),
-            lambda lg: groq_skoring(laporan, bagian, raw_verif, kritis, konfirmatif, alur_groq_pakai, lg),
+            lambda lg: groq_skoring(laporan, bagian, raw_verif, kritis, konfirmatif, alur_groq_pakai, area_groq, lg),
         )
         log.write(f"✅ Skoring selesai (Gemini: {'OK' if raw_skor_gem else 'GAGAL'}, Groq: {'OK' if raw_skor_groq else 'GAGAL'})")
 
-        p_sav = prompt_saving(laporan)
+        p_sav = prompt_saving(laporan, area)
         raw_sav_gem, raw_sav_groq = paralel(
             log, catatan,
             lambda lg: panggil_gemini(p_sav, "Analisis Saving", lg, config=CONFIG_JSON),
-            lambda lg: groq_saving(laporan, lg),
+            lambda lg: groq_saving(laporan, area_groq, lg),
         )
         log.write("✅ Analisis saving selesai")
 
         log.write("💬 **[6/6] Umpan balik peserta** (paralel)")
-        p_fb_gem = prompt_feedback(laporan, raw_verif, raw_alur_gem, raw_skor_gem)
+        p_fb_gem = prompt_feedback(laporan, raw_verif, raw_alur_gem, raw_skor_gem, area)
         raw_fb_gem, raw_fb_groq = paralel(
             log, catatan,
             lambda lg: panggil_gemini(p_fb_gem, "Umpan Balik", lg, config=CONFIG_JSON),
-            lambda lg: groq_feedback(laporan, raw_verif, alur_groq_pakai, raw_skor_groq, lg),
+            lambda lg: groq_feedback(laporan, raw_verif, alur_groq_pakai, raw_skor_groq, area_groq, lg),
         )
 
         return {
+            "area": area_nama,
             "laporan": laporan, "verif": raw_verif,
             "alur_gem": raw_alur_gem, "alur_groq": raw_alur_groq,
             "kritis": kritis, "konfirmatif": konfirmatif,
@@ -1384,7 +1605,7 @@ def jalankan_pipeline(uploaded_file, log):
             "catatan": catatan,
             "konteks_groq": {
                 "laporan": laporan, "verif": raw_verif, "kritis": kritis,
-                "konfirmatif": konfirmatif, "alur": alur_groq_pakai,
+                "konfirmatif": konfirmatif, "alur": alur_groq_pakai, "area": area_groq,
             },
         }
     finally:
@@ -1403,6 +1624,7 @@ def jalankan_pipeline(uploaded_file, log):
 def simpan_hasil(raw, nama_file):
     ss = st.session_state
     ss.nama_file = nama_file
+    ss.area = raw.get("area", "Umum")
     ss.log_error = raw.get("catatan", [])
     ss.konteks_groq = raw.get("konteks_groq", {})
     ss.df_verifikasi = buat_df(bersihkan_dan_parse_json(raw["verif"]))
@@ -1450,7 +1672,7 @@ def lengkapi_skor_groq(kosong):
         try:
             bagian = pecah_bagian_ekstraksi(k["laporan"])
             raw_baru = groq_skoring(
-                k["laporan"], bagian, k["verif"], k["kritis"], k["konfirmatif"], k["alur"], sb,
+                k["laporan"], bagian, k["verif"], k["kritis"], k["konfirmatif"], k["alur"], k.get("area", ""), sb,
                 hanya_kriteria=set(kosong),
             )
             items_baru = bersihkan_dan_parse_json(raw_baru)
@@ -1532,6 +1754,7 @@ def buat_excel(df_banding_final):
         ringkasan = pd.DataFrame(
             [
                 ["File dokumen", ss.nama_file],
+                ["Area/Departemen", ss.area],
                 ["Tanggal laporan", datetime.now().strftime("%Y-%m-%d %H:%M")],
                 ["Model Gemini", MODEL_GEMINI],
                 ["Model Groq", MODEL_GROQ],
@@ -1565,6 +1788,12 @@ def buat_excel(df_banding_final):
 uploaded_file = st.file_uploader("Pilih file PDF Kaizen", type="pdf")
 
 if uploaded_file is not None and not st.session_state.proses_selesai:
+    pilihan_area = st.selectbox(
+        "Area/Departemen paper",
+        [OPSI_DETEKSI] + list(PROFIL_AREA.keys()),
+        help="Pilih area agar AI menilai kewajaran teknis sesuai proses area tersebut. "
+             "'Deteksi otomatis' membaca area dari isi dokumen; pilih manual bila hasil deteksi keliru.",
+    )
     st.caption(
         "⏱️ Estimasi 10–15 menit per dokumen. "
         "Progres bisa dipantau di panel di bawah. Apabila ada kegagalan sistem, mohon berikan jeda waktu "
@@ -1574,7 +1803,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
         berhasil = False
         with st.status("🤖 Sistem sedang memproses...", expanded=True) as status_box:
             try:
-                raw = jalankan_pipeline(uploaded_file, status_box)
+                raw = jalankan_pipeline(uploaded_file, status_box, pilihan_area)
                 simpan_hasil(raw, uploaded_file.name)
                 st.session_state.proses_selesai = True
                 status_box.update(label="✅ Analisis Dual-AI selesai!", state="complete")
@@ -1593,6 +1822,7 @@ if uploaded_file is not None and not st.session_state.proses_selesai:
 if st.session_state.proses_selesai:
     ss = st.session_state
     st.success("Analisis Dual-AI selesai! Silakan bandingkan penalaran Gemini dan Groq di bawah.")
+    st.info(f"🏭 Area/Departemen yang dipakai sebagai konteks penilaian: **{ss.area}**")
 
     kosong_gem = [n for n in RUBRIK_META if n not in _nomor_ada(ss.df_rubrik_gemini)]
     kosong_groq = [n for n in RUBRIK_META if n not in _nomor_ada(ss.df_rubrik_groq)]
